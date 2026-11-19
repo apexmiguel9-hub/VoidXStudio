@@ -14,7 +14,7 @@
       falta AppCompat: el tema del framework vale y sobra toda la cadena de dependencias androidx.
       `.NoActionBar` porque la UI es de egui y dibuja su propia barra de ventanas.
     -->
-    <style name="Theme.FigCraft" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.VoidXStudio" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">#0f1115</item>
     </style>
 </resources>

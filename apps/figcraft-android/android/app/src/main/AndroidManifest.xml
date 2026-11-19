@@ -24,7 +24,7 @@
         android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FigCraft">
+        android:theme="@style/Theme.VoidXStudio">
 
         <!-- MEDIDO: `GameActivity` de androidx.games trae el `SurfaceView` y el `InputConnection`
              que `NativeActivity` no tiene, que es lo que hace funcionar el teclado blando.

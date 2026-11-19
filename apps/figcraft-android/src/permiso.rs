@@ -1,7 +1,7 @@
 //! Lo unico que queda de JNI: el permiso de almacenamiento y los **insets del sistema**.
 //!
 //! Port directo de `vectorcraft-android/src/permiso.rs` (mismo `NativeActivity`, mismo
-//! handshake). Lo unico que cambia es el paquete: `ai.storyteller.figcraft`.
+//! handshake). Lo unico que cambia es el paquete: `io.VoidXStudio.app`.
 //!
 //! SAF se ha ido: el browser es nuestro y se dibuja en egui (ver el modulo
 //! [`crate::browser`]). De la parte de Java solo quedan dos cosas: pedir
@@ -36,7 +36,7 @@
 //! `/storage/emulated/0/`. MEDIDO el porque:
 //!
 //! ```text
-//! $ adb shell run-as ai.storyteller.figcraft ls /sdcard
+//! $ adb shell run-as io.VoidXStudio.app ls /sdcard
 //! ls: /sdcard: Permission denied
 //! ```
 //!
@@ -52,7 +52,7 @@
 //! MEDIDO: `Env::find_class` y `Env::load_class` fallan desde el hilo nativo de
 //! `android-activity` con `NoClassDefFound`, y `LoaderContext::FromObject` tambien
 //! fallo. La quinta via, que funciona, es que **`MainActivity.onCreate` nos pase su
-//! propia clase** llamando a [`Java_ai_storyteller_figcraft_MainActivity_nativeListo`];
+//! propia clase** llamando a [`Java_io_VoidXStudio_app_MainActivity_nativeListo`];
 //! a partir de ahi hay una referencia global y no hace falta buscar nada.
 //!
 //! MEDIDO tambien que hace falta `System.loadLibrary("vectorcraft_android")` explicito
@@ -160,7 +160,7 @@ pub fn registrar(app: &winit::platform::android::activity::AndroidApp) {
 /// y `EnvUnowned::with_env` es, textual de la documentacion, *"specifically intended to
 /// be used within native/foreign Java method implementations"*.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_ai_storyteller_figcraft_MainActivity_nativeListo<'caller>(
+pub extern "system" fn Java_io_VoidXStudio_app_MainActivity_nativeListo<'caller>(
     mut env: jni::EnvUnowned<'caller>,
     clase: jni::objects::JClass<'caller>,
 ) {
@@ -550,7 +550,7 @@ pub fn cada_frame() {
 ///
 /// ```text
 /// Abrir
-/// /data/data/ai.storyteller.figcraft/documents
+/// /data/data/io.VoidXStudio.app/documents
 /// No such file or directory (os error 2)
 /// ```
 ///
@@ -581,7 +581,7 @@ fn preguntar_una_vez() {
 fn marca() -> std::path::PathBuf {
     match std::env::var("HOME") {
         Ok(h) if !h.is_empty() => std::path::PathBuf::from(h).join(".permiso-preguntado"),
-        _ => std::path::PathBuf::from("/data/data/ai.storyteller.figcraft/.permiso-preguntado"),
+        _ => std::path::PathBuf::from("/data/data/io.VoidXStudio.app/.permiso-preguntado"),
     }
 }
 
@@ -610,7 +610,7 @@ fn marcar_preguntado() {
 pub fn directorio_privado() -> std::path::PathBuf {
     match std::env::var("HOME") {
         Ok(h) if !h.is_empty() => std::path::PathBuf::from(h).join("documents"),
-        _ => std::path::PathBuf::from("/data/data/ai.storyteller.figcraft/documents"),
+        _ => std::path::PathBuf::from("/data/data/io.VoidXStudio.app/documents"),
     }
 }
 

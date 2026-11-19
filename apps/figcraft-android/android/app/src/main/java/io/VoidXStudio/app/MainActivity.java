@@ -1,4 +1,4 @@
-package ai.storyteller.figcraft;
+package io.VoidXStudio.app;
 
 import android.app.NativeActivity;
 import android.content.ClipData;
@@ -47,7 +47,7 @@ import android.util.Log;
  */
 public class MainActivity extends NativeActivity {
 
-    private static final String TAG = "FigCraft";
+    private static final String TAG = "VoidXStudio";
     private static final String LIB = "figcraft_android";
 
     static {

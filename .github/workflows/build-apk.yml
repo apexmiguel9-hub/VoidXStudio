@@ -167,7 +167,7 @@ jobs:
       - name: Comprobar que el APK lleva la clase del Activity
         run: |
           APK=apps/figcraft-android/android/app/build/outputs/apk/debug/app-debug.apk
-          PATRON="ai/storyteller/figcraft/MainActivity"
+          PATRON="io/VoidXStudio/app/MainActivity"
           ENCONTRADA=""
           for D in $(unzip -l "$APK" | awk '{print $4}' | grep -E '^classes[0-9]*\.dex$'); do
             unzip -p "$APK" "$D" > /tmp/uno.dex
@@ -179,7 +179,7 @@ jobs:
           if [ -n "$ENCONTRADA" ]; then
             echo "OK: la clase esta en $ENCONTRADA"
           else
-            echo "::error::el APK NO lleva la clase ai.storyteller.figcraft.MainActivity"
+            echo "::error::el APK NO lleva la clase io.VoidXStudio.app.MainActivity"
             exit 1
           fi
 

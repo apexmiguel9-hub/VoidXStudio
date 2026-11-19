@@ -422,17 +422,17 @@ pub fn brand(size: f32) -> FontId {
 /// The two-tone Archivo wordmark used in the home sidebar and About window.
 pub fn paint_wordmark(painter: &egui::Painter, left_center: egui::Pos2, size: f32, t: &Tokens) {
     let font = brand(size);
-    let fig = painter.layout_no_wrap("Fig".into(), font.clone(), t.text);
-    let fig_width = fig.size().x;
-    painter.galley(egui::pos2(left_center.x, left_center.y - fig.size().y / 2.0), fig, t.text);
-    painter.text(egui::pos2(left_center.x + fig_width, left_center.y), egui::Align2::LEFT_CENTER, "Craft", font, t.accent_text);
+    let voidx = painter.layout_no_wrap("VoidX".into(), font.clone(), t.text);
+    let voidx_width = voidx.size().x;
+    painter.galley(egui::pos2(left_center.x, left_center.y - voidx.size().y / 2.0), voidx, t.text);
+    painter.text(egui::pos2(left_center.x + voidx_width, left_center.y), egui::Align2::LEFT_CENTER, "Studio", font, t.accent_text);
 }
 
-/// Paint the owner's original chameleon icon from the existing app asset.
+/// Paint the VoidXStudio app icon (V y X entrelazadas) from the original asset.
 pub fn paint_app_icon(ui: &egui::Ui, rect: egui::Rect) {
     static ICON: OnceLock<Option<egui::ColorImage>> = OnceLock::new();
     let image = ICON.get_or_init(|| {
-        let rgba = image::load_from_memory(include_bytes!("../../../assets/app-icon/figcraft-64.png")).ok()?.to_rgba8();
+        let rgba = image::load_from_memory(include_bytes!("../../../assets/app-icon/voidx-512.png")).ok()?.to_rgba8();
         Some(egui::ColorImage::from_rgba_unmultiplied([rgba.width() as usize, rgba.height() as usize], rgba.as_raw()))
     });
     let Some(image) = image else {
@@ -440,9 +440,9 @@ pub fn paint_app_icon(ui: &egui::Ui, rect: egui::Rect) {
         crate::icons::paint(ui.painter(), rect.shrink(rect.width() * 0.22), crate::icons::Icon::Logo, ACCENT_ON);
         return;
     };
-    let id = egui::Id::unique("figcraft_original_app_icon");
+    let id = egui::Id::unique("voidx_original_app_icon");
     let texture = ui.ctx().data(|data| data.get_temp::<egui::TextureHandle>(id)).unwrap_or_else(|| {
-        let texture = ui.ctx().load_texture("figcraft-original-app-icon", image.clone(), egui::TextureOptions::LINEAR);
+        let texture = ui.ctx().load_texture("voidx-original-app-icon", image.clone(), egui::TextureOptions::LINEAR);
         ui.ctx().data_mut(|data| data.insert_temp(id, texture.clone()));
         texture
     });

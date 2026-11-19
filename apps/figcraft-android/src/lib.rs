@@ -291,7 +291,7 @@ fn window_options() -> eframe::NativeOptions {
 
 /// Arranque en escritorio, para probar sin movil.
 pub fn run() -> eframe::Result {
-    eframe::run_native("FigCraft", window_options(), Box::new(|cc| build(cc).map_err(|e| e.into())))
+    eframe::run_native("VoidXStudio", window_options(), Box::new(|cc| build(cc).map_err(|e| e.into())))
 }
 
 /// Punto de entrada en Android.
@@ -353,7 +353,7 @@ pub extern "C" fn android_main(app: winit::platform::android::activity::AndroidA
 
     log::info!("figcraft-android: arrancando, version {}", env!("CARGO_PKG_VERSION"));
 
-    let resultado = eframe::run_native("FigCraft", options, Box::new(|cc| build(cc).map_err(|e| e.into())));
+    let resultado = eframe::run_native("VoidXStudio", options, Box::new(|cc| build(cc).map_err(|e| e.into())));
 
     // MEDIDO por que esto NO es un `panic!`: el proyecto prohibe panicos en codigo que se
     // reparte. `run_native` devuelve `Err` si no puede crear la ventana o el contexto de

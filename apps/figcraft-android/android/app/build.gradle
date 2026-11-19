@@ -18,7 +18,7 @@ apply plugin: 'com.android.application'
 //     Could not find method signingConfigs() for arguments [...] on project ':app'
 //
 android {
-    namespace 'ai.storyteller.figcraft'
+    namespace 'io.VoidXStudio.app'
     compileSdk 34
     ndkVersion '26.1.10909125'
 
@@ -32,7 +32,7 @@ android {
     }
 
     defaultConfig {
-        applicationId 'ai.storyteller.figcraft'
+        applicationId 'io.VoidXStudio.app'
         minSdk 24
         targetSdk 34
         versionCode 4
