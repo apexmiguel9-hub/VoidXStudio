@@ -63,6 +63,15 @@ pub trait Services {
     fn reduce_motion(&self) -> bool {
         false
     }
+    /// The folder where the app's own documents live (permission-free on Android:
+    /// `/data/data/<package>/documents`; desktop: `$HOME`). The default reads `$HOME`.
+    fn documents_dir(&self) -> PathBuf {
+        std::env::var("HOME")
+            .ok()
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    }
     /// The system asks for the dark interface (the freedesktop colour scheme): for platforms whose
     /// windowing stack doesn't report a theme (winit gives none on Linux and the BSDs).
     fn system_dark(&self) -> Option<bool> {

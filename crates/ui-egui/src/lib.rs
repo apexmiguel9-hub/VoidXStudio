@@ -686,7 +686,7 @@ impl Default for UiState {
             shortcuts_tab: figcraft_engine::keymap::Group::Essential,
             shortcuts_query: String::new(),
             opacity_digit: None,
-            home: false,
+            home: true,
             home_view: home::Home::default(),
             project_dialog: None,
             project: None,

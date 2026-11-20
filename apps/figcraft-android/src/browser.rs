@@ -428,6 +428,12 @@ impl Services for Android {
     fn gamepad_held(&mut self) -> u32 {
         0
     }
+
+    /// El directorio privado de documentos de la app en Android:
+    /// `/data/data/io.VoidXStudio.app/documents`.
+    fn documents_dir(&self) -> PathBuf {
+        permiso::directorio_privado()
+    }
 }
 
 /// Si hay que mostrar el aviso de permiso.

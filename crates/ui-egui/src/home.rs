@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use egui::{Align2, Color32, CornerRadius, Id, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align2, Color32, CornerRadius, Id, Order, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use figcraft_engine::templates::{Kind, TEMPLATES, Template};
 use serde_json::json;
 
@@ -187,11 +187,17 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
 /// The Create Project dialog: target language, app name, package name and optional icon; creates
 /// the project (saving it) and opens its world.
 fn create_project_dialog(app: &mut FigApp, ui: &mut Ui) {
-    let Some(mut draft) = app.ui.project_dialog.take() else { return };
+    let mut draft = match app.ui.project_dialog.take() {
+        Some(d) => d,
+        None => return,
+    };
     let mut open = true;
-    crate::dialogs::window("Create Project", ui.ctx())
+    let ctx = ui.ctx();
+    crate::dialogs::window("Create Project", &ctx)
+        .id(Id::new("create_project_dialog"))
+        .order(Order::Foreground)
         .open(&mut open)
-        .show(ui, |ui| {
+        .show(&ctx, |ui| {
             let t = Tokens::get(ui.ctx());
             ui.set_width(crate::dialogs::dialog_width(ui.ctx(), 420.0));
             ui.label(egui::RichText::new("Language").font(semibold(12.0)).color(t.text_secondary));
@@ -215,8 +221,14 @@ fn create_project_dialog(app: &mut FigApp, ui: &mut Ui) {
             ui.add_space(6.0);
             ui.add(egui::TextEdit::singleline(&mut draft.icon).desired_width(280.0));
             ui.add_space(10.0);
-            if widgets::button(ui, "Create", true, !draft.name.trim().is_empty() && crate::project::VoidXProject::package_name_ok(&draft.package_name)).clicked() {
-                let name = if draft.name.trim().is_empty() { "My App".to_string() } else { draft.name.trim().to_string() };
+            let can_create = !draft.name.trim().is_empty()
+                && crate::project::VoidXProject::package_name_ok(&draft.package_name);
+            if widgets::button(ui, "Create", true, can_create).clicked() {
+                let name = if draft.name.trim().is_empty() {
+                    "My App".to_string()
+                } else {
+                    draft.name.trim().to_string()
+                };
                 let project = crate::project::VoidXProject {
                     name: name.clone(),
                     package_name: draft.package_name.trim().to_string(),
@@ -230,8 +242,12 @@ fn create_project_dialog(app: &mut FigApp, ui: &mut Ui) {
                         logic: None,
                     }],
                 };
-                let home = std::env::var("HOME").ok().filter(|h| !h.is_empty()).map(std::path::PathBuf::from).unwrap_or_default();
-                let _ = crate::project::save(&home.join(format!("{}.vxs", name)), &project);
+                let dir = app.services.documents_dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = crate::project::save(
+                    &dir.join(format!("{}.vxs", name)),
+                    &project,
+                );
                 app.ui.project = Some(project);
                 app.ui.project_dialog = None;
             }
@@ -239,6 +255,13 @@ fn create_project_dialog(app: &mut FigApp, ui: &mut Ui) {
                 app.ui.project_dialog = None;
             }
         });
+    if !open {
+        // Click outside / Escape closed the window: forget the draft.
+        app.ui.project_dialog = None;
+    } else {
+        // The dialog is still open: keep the draft with whatever the user typed.
+        app.ui.project_dialog = Some(draft);
+    }
 }
 
 /// The World Space: the open project's groups as blocks, each with an Edit to its workspace.
