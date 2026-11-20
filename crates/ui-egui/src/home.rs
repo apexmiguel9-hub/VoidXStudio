@@ -143,6 +143,11 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     dropped(app, ui.ctx());
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
+        if let Some(project) = app.ui.project.clone() {
+            // The World Space: the project's groups as blocks in a world.
+            world_space(app, ui, &t, &project);
+            return;
+        }
         let rect = ui.max_rect();
         let left = Rect::from_min_size(rect.min, vec2(SIDEBAR, rect.height()));
         ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0, t.border));
@@ -172,8 +177,86 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
             });
         });
     });
+    if app.ui.project_dialog.is_some() {
+        create_project_dialog(app, ui);
+    }
     // The whole window is the drop target, not only the canvas.
     crate::drop_overlay(ui.ctx(), ui.ctx().content_rect(), tr("Drop to open"));
+}
+
+/// The Create Project dialog: target language, app name, package name and optional icon; creates
+/// the project (saving it) and opens its world.
+fn create_project_dialog(app: &mut FigApp, ui: &mut Ui) {
+    let Some(mut draft) = app.ui.project_dialog.take() else { return };
+    let mut open = true;
+    crate::dialogs::window("Create Project", ui.ctx())
+        .open(&mut open)
+        .show(ui, |ui| {
+            let t = Tokens::get(ui.ctx());
+            ui.set_width(crate::dialogs::dialog_width(ui.ctx(), 420.0));
+            ui.label(egui::RichText::new("Language").font(semibold(12.0)).color(t.text_secondary));
+            ui.horizontal_wrapped(|ui| {
+                let langs = [
+                    ("Kotlin", crate::project::ProjectLanguage::Kotlin),
+                    ("Flutter", crate::project::ProjectLanguage::Flutter),
+                    ("Dart", crate::project::ProjectLanguage::Dart),
+                    ("Slint", crate::project::ProjectLanguage::Slint),
+                ];
+                for (label, lang) in langs {
+                    if ui.button(label).clicked() {
+                        draft.language = lang;
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            ui.add(egui::TextEdit::singleline(&mut draft.name).desired_width(280.0));
+            ui.add_space(6.0);
+            ui.add(egui::TextEdit::singleline(&mut draft.package_name).desired_width(280.0));
+            ui.add_space(6.0);
+            ui.add(egui::TextEdit::singleline(&mut draft.icon).desired_width(280.0));
+            ui.add_space(10.0);
+            if widgets::button(ui, "Create", true, !draft.name.trim().is_empty() && crate::project::VoidXProject::package_name_ok(&draft.package_name)).clicked() {
+                let name = if draft.name.trim().is_empty() { "My App".to_string() } else { draft.name.trim().to_string() };
+                let project = crate::project::VoidXProject {
+                    name: name.clone(),
+                    package_name: draft.package_name.trim().to_string(),
+                    language: draft.language,
+                    icon: (!draft.icon.is_empty()).then_some(draft.icon.clone()),
+                    world: crate::project::World::default(),
+                    files: vec![crate::project::FileGroup {
+                        name: "Main".to_string(),
+                        kind: crate::project::FileGroupKind::Ui,
+                        visual: Some("untitled.figcraft".to_string()),
+                        logic: None,
+                    }],
+                };
+                let home = std::env::var("HOME").ok().filter(|h| !h.is_empty()).map(std::path::PathBuf::from).unwrap_or_default();
+                let _ = crate::project::save(&home.join(format!("{}.vxs", name)), &project);
+                app.ui.project = Some(project);
+                app.ui.project_dialog = None;
+            }
+            if widgets::button(ui, "Cancel", false, true).clicked() {
+                app.ui.project_dialog = None;
+            }
+        });
+}
+
+/// The World Space: the open project's groups as blocks, each with an Edit to its workspace.
+fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens, project: &crate::project::VoidXProject) {
+    ui.label(egui::RichText::new("World Space").font(semibold(18.0)).color(t.text));
+    ui.add_space(12.0);
+    for group in &project.files {
+        let (rect, resp) = ui.allocate_exact_size(vec2(240.0, 72.0), Sense::click());
+        crate::home::card_frame(ui, t, rect, &resp);
+        ui.painter().text(pos2(rect.min.x + 12.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &group.name, semibold(12.0), t.text);
+        ui.painter().text(pos2(rect.max.x - 12.0, rect.center().y - 8.0), Align2::RIGHT_CENTER, group.kind.label(), regular(11.0), t.text_secondary);
+        if resp.clicked() {
+            if group.kind == crate::project::FileGroupKind::Ui {
+                app.run("file.new", json!({}));
+                app.ui.home = false;
+            }
+        }
+    }
 }
 
 /// Files dropped on the home screen: each one the app opens becomes a document of its own (the
@@ -330,11 +413,12 @@ fn action_card(ui: &mut Ui, t: &Tokens, icon: Icon, title: &str, sub: &str) -> b
 
 fn recents(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     heading(ui, t, tr("Recents"));
-    let (mut new_file, mut new_board, mut open) = (false, false, false);
+    let (mut new_file, mut new_board, mut open, mut create_project) = (false, false, false, false);
     ui.horizontal_wrapped(|ui| {
         new_file = action_card(ui, t, Icon::PenNib, tr("New design file"), tr("Start from a blank canvas"));
         new_board = action_card(ui, t, Icon::Board, tr("New board"), tr("Sticky notes, shapes and connectors"));
         open = action_card(ui, t, Icon::Page, tr("Open file"), tr("Open .figcraft, .svg or images"));
+        create_project = action_card(ui, t, Icon::Layers, tr("Create Project"), tr("A .vxs project for an app"));
     });
     if new_file || new_board {
         app.run(if new_board { "file.newBoard" } else { "file.new" }, json!({}));
@@ -342,6 +426,9 @@ fn recents(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     }
     if open {
         app.open_dialog();
+    }
+    if create_project {
+        app.ui.project_dialog = Some(crate::project::ProjectDraft::default());
     }
     // Join a file someone shared (the Join dialog shows what the join is doing).
     subheading(ui, t, tr("Join with a code"));

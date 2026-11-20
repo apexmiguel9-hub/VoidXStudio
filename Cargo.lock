@@ -2197,6 +2197,7 @@ dependencies = [
  "toml",
  "wat",
  "web-time",
+ "zip 2.6.1",
 ]
 
 [[package]]

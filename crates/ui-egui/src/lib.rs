@@ -26,6 +26,7 @@ pub mod icons;
 pub mod live;
 pub mod menus;
 pub mod pending_open;
+pub mod project;
 pub mod popover;
 pub mod present;
 pub mod shortcuts;
@@ -476,6 +477,10 @@ pub struct UiState {
     pub home: bool,
     /// The home screen's section, and the Templates search and filter.
     pub home_view: home::Home,
+    /// The Create Project draft the dialog edits, when open.
+    pub project_dialog: Option<crate::project::ProjectDraft>,
+    /// The project whose world is on screen (the World Space), when one is open.
+    pub project: Option<crate::project::VoidXProject>,
     /// How the window's title bar is drawn (the desktop app sets it when it opens the window).
     pub title_bar: TitleBar,
     /// Every icon on one screen, for reviewing the set (control channel `ui.set {iconGallery}`).
@@ -683,6 +688,8 @@ impl Default for UiState {
             opacity_digit: None,
             home: false,
             home_view: home::Home::default(),
+            project_dialog: None,
+            project: None,
             title_bar: TitleBar::Native,
             icon_gallery: false,
             toast: None,
