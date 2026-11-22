@@ -13,6 +13,8 @@ pub struct NodeEditorState {
     pub dragging_node: Option<u64>,
     pub selected_node: Option<u64>,
     pub add_open: bool,
+    pub add_query: String,
+    pub add_selected: Option<NodeKind>,
     pub connect_panel: Option<ConnectPanel>,
 }
 
@@ -76,10 +78,9 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
     draw_grid(&painter, rect, pan, zoom, ui.visuals().dark_mode);
 
     if resp.clicked() && !resp.dragged() {
-        // click on empty canvas clears selection/panels unless click is consumed by widgets; handled later by checking pointer.
         st.selected_node = None;
         st.connect_panel = None;
-        st.add_open = false;
+        // keep add modal state unless explicitly closed
     }
 
     let accent = group_accent(group_kind);
@@ -139,8 +140,8 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
             }
         }
 
-        // Connection buttons
-        let btn_h = 24.0 * zoom;
+        // Connection buttons (mobile touch target >= 36px)
+        let btn_h = (36.0 * zoom).max(30.0);
         let btn_w = (nr.width() - 18.0*zoom) / 2.0;
         let in_btn = Rect::from_min_size(pos2(nr.min.x + 6.0*zoom, nr.max.y - btn_h - 6.0*zoom), vec2(btn_w, btn_h));
         let out_btn = Rect::from_min_size(pos2(in_btn.max.x + 6.0*zoom, nr.max.y - btn_h - 6.0*zoom), vec2(btn_w, btn_h));
@@ -148,8 +149,8 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
         let has_out = !n.kind.outputs().is_empty();
         if has_in {
             let r = ui.interact(in_btn, ui.scope_id().with(("in_btn", n.id)), Sense::click());
-            painter.rect_filled(in_btn, CornerRadius::same(6), if r.hovered() { Color32::from_rgb(55,55,62) } else { Color32::from_rgb(45,45,52) });
-            painter.text(in_btn.center(), Align2::CENTER_CENTER, "⬅ Entrada", regular((10.0*zoom).max(4.0)), t.text);
+            painter.rect_filled(in_btn, CornerRadius::same(8), if r.hovered() { Color32::from_rgb(55,55,62) } else { Color32::from_rgb(45,45,52) });
+            painter.text(in_btn.center(), Align2::CENTER_CENTER, "⬅ Entrada", regular((11.0*zoom).max(10.0)), t.text);
             if r.clicked() {
                 st.selected_node = Some(n.id);
                 let port = n.kind.inputs().get(0).unwrap_or(&"in").to_string();
@@ -159,8 +160,8 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
         }
         if has_out {
             let r = ui.interact(out_btn, ui.scope_id().with(("out_btn", n.id)), Sense::click());
-            painter.rect_filled(out_btn, CornerRadius::same(6), if r.hovered() { Color32::from_rgb(55,55,62) } else { Color32::from_rgb(45,45,52) });
-            painter.text(out_btn.center(), Align2::CENTER_CENTER, "Salida ➡", regular((10.0*zoom).max(4.0)), t.text);
+            painter.rect_filled(out_btn, CornerRadius::same(8), if r.hovered() { Color32::from_rgb(55,55,62) } else { Color32::from_rgb(45,45,52) });
+            painter.text(out_btn.center(), Align2::CENTER_CENTER, "Salida ➡", regular((11.0*zoom).max(10.0)), t.text);
             if r.clicked() {
                 st.selected_node = Some(n.id);
                 let port = n.kind.outputs().get(0).unwrap_or(&"out").to_string();
@@ -209,106 +210,220 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
         if st.connect_panel.as_ref().is_some_and(|p| p.node_id == id) { st.connect_panel = None; }
     }
 
-    // Connect mini-panel
+    // Connect mini-panel with semantic compatibility
     if let Some(panel_state) = st.connect_panel.clone() {
         if let Some(node) = graph.nodes.iter().find(|n| n.id == panel_state.node_id).cloned() {
             let nr = node_rect(rect, pan, zoom, &node);
-            let panel_w = 240.0;
-            let panel_h = 220.0;
+            let panel_w = 300.0f32.min(rect.width() - 20.0);
+            let panel_h = 260.0f32.min(rect.height() - 20.0);
             let anchor = if panel_state.is_output { pos2(nr.max.x + 8.0, nr.min.y) } else { pos2(nr.min.x - panel_w - 8.0, nr.min.y) };
-            let panel_rect = Rect::from_min_size(anchor.clamp(rect.min, rect.max - vec2(panel_w, panel_h)), vec2(panel_w, panel_h));
-            let panel_resp = ui.interact(panel_rect, ui.scope_id().with(("conn_panel", panel_state.node_id, &panel_state.port, panel_state.is_output)), Sense::click());
-            painter.rect_filled(panel_rect, CornerRadius::same(10), Color32::from_rgb(30,30,34));
-            painter.rect_stroke(panel_rect, CornerRadius::same(10), Stroke::new(1.0, accent), StrokeKind::Inside);
-            painter.text(pos2(panel_rect.min.x + 10.0, panel_rect.min.y + 16.0), Align2::LEFT_CENTER, if panel_state.is_output { "Conectar salida" } else { "Conectar entrada" }, semibold(12.5), Color32::WHITE);
-            let close_r = Rect::from_min_size(pos2(panel_rect.max.x - 28.0, panel_rect.min.y + 6.0), vec2(20.0, 20.0));
+            let panel_rect = Rect::from_min_size(anchor.clamp(rect.min + vec2(8.0,8.0), rect.max - vec2(panel_w + 8.0, panel_h + 8.0)), vec2(panel_w, panel_h));
+            let _panel_resp = ui.interact(panel_rect, ui.scope_id().with(("conn_panel", panel_state.node_id, &panel_state.port, panel_state.is_output)), Sense::click());
+            painter.rect_filled(panel_rect, CornerRadius::same(12), Color32::from_rgb(30,30,34));
+            painter.rect_stroke(panel_rect, CornerRadius::same(12), Stroke::new(1.0, accent), StrokeKind::Inside);
+            painter.text(pos2(panel_rect.min.x + 12.0, panel_rect.min.y + 18.0), Align2::LEFT_CENTER, if panel_state.is_output { "Conectar salida" } else { "Conectar entrada" }, semibold(12.5), Color32::WHITE);
+            let close_r = Rect::from_min_size(pos2(panel_rect.max.x - 34.0, panel_rect.min.y + 8.0), vec2(26.0, 26.0));
             let close_resp = ui.interact(close_r, ui.scope_id().with(("conn_close", panel_state.node_id)), Sense::click());
-            painter.text(close_r.center(), Align2::CENTER_CENTER, "×", regular(14.0), if close_resp.hovered() { Color32::WHITE } else { Color32::from_gray(180) });
+            painter.text(close_r.center(), Align2::CENTER_CENTER, "×", regular(15.0), if close_resp.hovered() { Color32::WHITE } else { Color32::from_gray(180) });
             if close_resp.clicked() { st.connect_panel = None; }
 
-            let mut y = panel_rect.min.y + 34.0;
+            let mut y = panel_rect.min.y + 38.0;
             if !panel_state.create_mode {
-                painter.text(pos2(panel_rect.min.x + 10.0, y), Align2::LEFT_TOP, "Nodos disponibles", regular(10.5), Color32::from_gray(170));
-                y += 18.0;
                 let candidates: Vec<LogicNode> = graph.nodes.iter().filter(|cand| cand.id != panel_state.node_id).cloned().collect();
-                for cand in candidates.iter().take(5) {
-                    let r = Rect::from_min_size(pos2(panel_rect.min.x + 8.0, y), vec2(panel_rect.width()-16.0, 26.0));
-                    let rr = ui.interact(r, ui.scope_id().with(("conn_pick", panel_state.node_id, cand.id, &panel_state.port, panel_state.is_output)), Sense::click());
-                    painter.rect_filled(r, CornerRadius::same(6), if rr.hovered() { Color32::from_rgb(52,52,60) } else { Color32::from_rgb(42,42,48) });
-                    painter.text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, cand.kind.label(), regular(11.0), Color32::WHITE);
-                    if rr.clicked() {
-                        create_link(graph, &panel_state, cand.id);
-                        st.connect_panel = None;
+                if candidates.is_empty() {
+                    painter.text(pos2(panel_rect.min.x + 12.0, y + 8.0), Align2::LEFT_TOP, "No hay otros nodos en este lienzo", regular(12.0), Color32::from_gray(190));
+                    let add_r = Rect::from_min_size(pos2(panel_rect.min.x + 12.0, y + 44.0), vec2(panel_rect.width()-24.0, 40.0));
+                    let add_resp = ui.interact(add_r, ui.scope_id().with(("conn_empty_add", panel_state.node_id)), Sense::click());
+                    painter.rect_filled(add_r, CornerRadius::same(8), if add_resp.hovered() { with_alpha(accent, 220) } else { accent });
+                    painter.text(add_r.center(), Align2::CENTER_CENTER, "+ Añadir Nodo", semibold(12.0), Color32::BLACK);
+                    if add_resp.clicked() { st.add_open = true; st.add_query.clear(); st.add_selected = None; st.connect_panel = None; }
+                } else {
+                    painter.text(pos2(panel_rect.min.x + 12.0, y), Align2::LEFT_TOP, "Nodos disponibles", regular(10.5), Color32::from_gray(170));
+                    y += 20.0;
+                    for cand in candidates.iter().take(5) {
+                        let (ok, reason) = connection_status(graph, &panel_state, cand);
+                        let r = Rect::from_min_size(pos2(panel_rect.min.x + 8.0, y), vec2(panel_rect.width()-16.0, 36.0));
+                        let rr = ui.interact(r, ui.scope_id().with(("conn_pick", panel_state.node_id, cand.id, &panel_state.port, panel_state.is_output)), Sense::click());
+                        let bg = if ok { Color32::from_rgba_unmultiplied(16,185,129, if rr.hovered() { 55 } else { 35 }) } else { Color32::from_rgba_unmultiplied(239,68,68, if rr.hovered() { 45 } else { 28 }) };
+                        let stroke = if ok { Color32::from_rgb(16,185,129) } else { Color32::from_rgb(239,68,68) };
+                        painter.rect_filled(r, CornerRadius::same(8), bg);
+                        painter.rect_stroke(r, CornerRadius::same(8), Stroke::new(1.0, stroke), StrokeKind::Inside);
+                        painter.text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, cand.kind.label(), regular(11.5), Color32::WHITE);
+                        let tag = if ok { "Compatible" } else { reason };
+                        let tag_font = regular(9.5);
+                        let tg = painter.layout_no_wrap(tag.to_string(), tag_font.clone(), Color32::WHITE);
+                        let tr = Rect::from_min_size(pos2(r.max.x - tg.size().x - 16.0, r.center().y - 9.0), vec2(tg.size().x + 10.0, 18.0));
+                        painter.rect_filled(tr, CornerRadius::same(9), with_alpha(stroke, 90));
+                        painter.text(tr.center(), Align2::CENTER_CENTER, tag, tag_font, Color32::WHITE);
+                        if rr.clicked() && ok {
+                            create_link(graph, &panel_state, cand.id);
+                            st.connect_panel = None;
+                        }
+                        y += 40.0;
                     }
-                    y += 30.0;
-                }
-                let create_r = Rect::from_min_size(pos2(panel_rect.min.x + 8.0, panel_rect.max.y - 36.0), vec2(panel_rect.width()-16.0, 28.0));
-                let create_resp = ui.interact(create_r, ui.scope_id().with(("conn_create_mode", panel_state.node_id)), Sense::click());
-                painter.rect_filled(create_r, CornerRadius::same(6), if create_resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
-                painter.text(create_r.center(), Align2::CENTER_CENTER, "+ Crear y conectar nuevo nodo", regular(11.0), Color32::BLACK);
-                if create_resp.clicked() {
-                    if let Some(cp) = st.connect_panel.as_mut() { cp.create_mode = true; }
+                    let create_r = Rect::from_min_size(pos2(panel_rect.min.x + 8.0, panel_rect.max.y - 44.0), vec2(panel_rect.width()-16.0, 36.0));
+                    let create_resp = ui.interact(create_r, ui.scope_id().with(("conn_create_mode", panel_state.node_id)), Sense::click());
+                    painter.rect_filled(create_r, CornerRadius::same(8), if create_resp.hovered() { with_alpha(accent, 220) } else { accent });
+                    painter.text(create_r.center(), Align2::CENTER_CENTER, "+ Crear y conectar nuevo nodo", regular(11.0), Color32::BLACK);
+                    if create_resp.clicked() {
+                        if let Some(cp) = st.connect_panel.as_mut() { cp.create_mode = true; }
+                    }
                 }
             } else {
-                painter.text(pos2(panel_rect.min.x + 10.0, y), Align2::LEFT_TOP, "Tipo de nuevo nodo", regular(10.5), Color32::from_gray(170));
-                y += 18.0;
+                painter.text(pos2(panel_rect.min.x + 12.0, y), Align2::LEFT_TOP, "Tipo de nuevo nodo", regular(10.5), Color32::from_gray(170));
+                y += 20.0;
                 for kind in NodeKind::allowed_for(group_kind).iter().take(6) {
-                    let r = Rect::from_min_size(pos2(panel_rect.min.x + 8.0, y), vec2(panel_rect.width()-16.0, 24.0));
+                    let r = Rect::from_min_size(pos2(panel_rect.min.x + 8.0, y), vec2(panel_rect.width()-16.0, 30.0));
                     let rr = ui.interact(r, ui.scope_id().with(("conn_new_kind", panel_state.node_id, kind.label(), panel_state.is_output)), Sense::click());
-                    painter.rect_filled(r, CornerRadius::same(6), if rr.hovered() { Color32::from_rgb(52,52,60) } else { Color32::from_rgb(42,42,48) });
-                    painter.text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, kind.label(), regular(10.5), Color32::WHITE);
+                    painter.rect_filled(r, CornerRadius::same(8), if rr.hovered() { Color32::from_rgb(52,52,60) } else { Color32::from_rgb(42,42,48) });
+                    painter.text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, kind.label(), regular(11.0), Color32::WHITE);
                     if rr.clicked() {
                         let id = graph.next_id();
-                        let mut nx = node.x + if panel_state.is_output { 280.0 } else { -280.0 };
+                        let nx = node.x + if panel_state.is_output { 280.0 } else { -280.0 };
                         let ny = node.y + 40.0 * (graph.nodes.len() % 4) as f32;
-                        if !panel_state.is_output { nx = node.x - 280.0; }
                         graph.nodes.push(LogicNode { id, kind: *kind, x: nx, y: ny, props: default_props(*kind) });
                         let new_panel = ConnectPanel { node_id: panel_state.node_id, port: panel_state.port.clone(), is_output: panel_state.is_output, create_mode: false };
-                        create_link(graph, &new_panel, id);
+                        if connection_status(graph, &new_panel, graph.nodes.iter().find(|n| n.id==id).expect("new")).0 {
+                            create_link(graph, &new_panel, id);
+                        }
                         st.selected_node = Some(id);
                         st.connect_panel = None;
                     }
-                    y += 27.0;
+                    y += 34.0;
                 }
-            }
-
-            if panel_resp.clicked() {
-                // keep panel open
             }
         } else {
             st.connect_panel = None;
         }
     }
 
-    // + Nodo panel (triggered by workspace toolbar)
+    // FAB + Añadir Nodo (always visible, mobile thumb-friendly)
+    let fab = Rect::from_min_size(pos2(rect.max.x - 84.0, rect.max.y - 84.0), vec2(64.0, 64.0));
+    let fab_resp = ui.interact(fab, ui.scope_id().with("add_node_fab"), Sense::click());
+    painter.circle_filled(fab.center(), 30.0, if fab_resp.hovered() { with_alpha(accent, 230) } else { accent });
+    painter.text(fab.center(), Align2::CENTER_CENTER, "+", semibold(30.0), Color32::BLACK);
+
+    // Add node modal (centered, container accent, searchable)
     if st.add_open {
-        let panel = Rect::from_min_size(pos2(rect.max.x - 280.0, rect.min.y + 52.0), vec2(260.0, 280.0));
-        painter.rect_filled(panel, CornerRadius::same(10), Color32::from_rgb(28,28,32));
-        painter.rect_stroke(panel, CornerRadius::same(10), Stroke::new(1.0, accent), StrokeKind::Inside);
-        painter.text(pos2(panel.min.x + 12.0, panel.min.y + 18.0), Align2::LEFT_CENTER, "Agregar nodo", semibold(13.0), Color32::WHITE);
-        let close_r = Rect::from_min_size(pos2(panel.max.x - 28.0, panel.min.y + 6.0), vec2(20.0, 20.0));
-        let close_resp = ui.interact(close_r, ui.scope_id().with("add_panel_close"), Sense::click());
-        painter.text(close_r.center(), Align2::CENTER_CENTER, "×", regular(14.0), if close_resp.hovered() { Color32::WHITE } else { Color32::from_gray(180) });
-        if close_resp.clicked() { st.add_open = false; }
-        let mut y = panel.min.y + 40.0;
-        for kind in NodeKind::allowed_for(group_kind) {
-            let r = Rect::from_min_size(pos2(panel.min.x + 10.0, y), vec2(panel.width()-20.0, 28.0));
-            let rr = ui.interact(r, ui.scope_id().with(("add_kind", kind.label())), Sense::click());
-            painter.rect_filled(r, CornerRadius::same(6), if rr.hovered() { Color32::from_rgb(45,45,52) } else { Color32::from_rgb(36,36,42) });
-            painter.text(pos2(r.min.x + 8.0, r.center().y), Align2::LEFT_CENTER, kind.label(), regular(11.5), Color32::WHITE);
-            if rr.clicked() {
+        let overlay = rect;
+        let overlay_resp = ui.interact(overlay, ui.scope_id().with("add_modal_overlay"), Sense::click());
+        painter.rect_filled(overlay, 0.0, Color32::from_rgba_unmultiplied(0,0,0,110));
+        let panel_w = 420.0f32.min(rect.width() - 24.0);
+        let panel_h = 460.0f32.min(rect.height() - 24.0);
+        let panel = Rect::from_center_size(rect.center(), vec2(panel_w, panel_h));
+        let panel_resp = ui.interact(panel, ui.scope_id().with("add_modal_panel"), Sense::click());
+        painter.rect_filled(panel, CornerRadius::same(14), Color32::from_rgb(28,28,32));
+        painter.rect_stroke(panel, CornerRadius::same(14), Stroke::new(1.5, accent), StrokeKind::Inside);
+
+        painter.text(pos2(panel.min.x + 16.0, panel.min.y + 24.0), Align2::LEFT_CENTER, "Añadir Nodo", semibold(18.0), Color32::WHITE);
+        let count = NodeKind::allowed_for(group_kind).len();
+        let badge_text = format!("{count} nodos disponibles");
+        let bf = regular(11.0);
+        let bg = painter.layout_no_wrap(badge_text.clone(), bf.clone(), Color32::BLACK);
+        let badge_r = Rect::from_min_size(pos2(panel.min.x + 132.0, panel.min.y + 14.0), vec2(bg.size().x + 14.0, 22.0));
+        painter.rect_filled(badge_r, CornerRadius::same(11), accent);
+        painter.text(badge_r.center(), Align2::CENTER_CENTER, badge_text, bf, Color32::BLACK);
+        let close_r = Rect::from_min_size(pos2(panel.max.x - 40.0, panel.min.y + 10.0), vec2(28.0, 28.0));
+        let close_resp = ui.interact(close_r, ui.scope_id().with("add_modal_close"), Sense::click());
+        painter.text(close_r.center(), Align2::CENTER_CENTER, "×", regular(18.0), if close_resp.hovered() { Color32::WHITE } else { Color32::from_gray(180) });
+
+        let search_r = Rect::from_min_size(pos2(panel.min.x + 14.0, panel.min.y + 48.0), vec2(panel.width()-28.0, 40.0));
+        painter.rect_filled(search_r, CornerRadius::same(8), Color32::from_rgb(40,40,46));
+        painter.rect_stroke(search_r, CornerRadius::same(8), Stroke::new(1.0, with_alpha(accent, 120)), StrokeKind::Inside);
+        let search_id = ui.scope_id().with("add_node_query");
+        let mut query = st.add_query.clone();
+        let mut te_resp = None;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(search_r.shrink2(vec2(10.0, 6.0))), |ui| {
+            let te = egui::TextEdit::singleline(&mut query).id(search_id).hint_text("Buscar nodo...").frame(egui::Frame::NONE).desired_width(f32::INFINITY);
+            te_resp = Some(ui.add(te));
+        });
+        st.add_query = query;
+
+        let q = st.add_query.trim().to_ascii_lowercase();
+        let filtered: Vec<NodeKind> = NodeKind::allowed_for(group_kind)
+            .iter()
+            .copied()
+            .filter(|k| {
+                q.is_empty()
+                    || k.label().to_ascii_lowercase().contains(&q)
+                    || k.description().to_ascii_lowercase().contains(&q)
+                    || k.category().map(|c| c.label().to_ascii_lowercase().contains(&q)).unwrap_or(false)
+            })
+            .collect();
+
+        let list_top = search_r.max.y + 10.0;
+        let create_r = Rect::from_min_size(pos2(panel.min.x + 14.0, panel.max.y - 54.0), vec2(panel.width()-28.0, 40.0));
+        let list_rect = Rect::from_min_max(pos2(panel.min.x + 14.0, list_top), pos2(panel.max.x - 14.0, create_r.min.y - 10.0));
+        painter.rect_filled(list_rect, CornerRadius::same(8), Color32::from_rgb(34,34,39));
+        let mut y = list_rect.min.y + 6.0;
+        let mut last_cat: Option<crate::logic::MainCategory> = None;
+        for kind in filtered.iter().take(12) {
+            if let Some(cat) = kind.category() {
+                if last_cat != Some(cat) {
+                    painter.text(pos2(list_rect.min.x + 10.0, y + 8.0), Align2::LEFT_CENTER, cat.label(), semibold(10.5), with_alpha(accent, 220));
+                    y += 20.0;
+                    last_cat = Some(cat);
+                }
+            }
+            let row = Rect::from_min_size(pos2(list_rect.min.x + 6.0, y), vec2(list_rect.width()-12.0, 44.0));
+            let rr = ui.interact(row, ui.scope_id().with(("add_modal_kind", kind.label())), Sense::click());
+            let selected = st.add_selected == Some(*kind);
+            painter.rect_filled(row, CornerRadius::same(8), if selected { with_alpha(accent, 55) } else if rr.hovered() { Color32::from_rgb(48,48,55) } else { Color32::TRANSPARENT });
+            if selected { painter.rect_stroke(row, CornerRadius::same(8), Stroke::new(1.0, accent), StrokeKind::Inside); }
+            painter.text(pos2(row.min.x + 10.0, row.min.y + 14.0), Align2::LEFT_CENTER, kind.label(), semibold(12.5), Color32::WHITE);
+            painter.text(pos2(row.min.x + 10.0, row.min.y + 30.0), Align2::LEFT_CENTER, kind.description(), regular(10.0), Color32::from_gray(185));
+            if rr.clicked() { st.add_selected = Some(*kind); }
+            y += 48.0;
+            if y > list_rect.max.y - 44.0 { break; }
+        }
+        if filtered.is_empty() {
+            painter.text(list_rect.center(), Align2::CENTER_CENTER, "Sin resultados", regular(12.0), Color32::from_gray(170));
+        }
+
+        let can_create = st.add_selected.is_some();
+        let create_resp = ui.interact(create_r, ui.scope_id().with("add_modal_create"), Sense::click());
+        painter.rect_filled(create_r, CornerRadius::same(8), if can_create { if create_resp.hovered() { with_alpha(accent, 220) } else { accent } } else { Color32::from_rgb(70,70,76) });
+        painter.text(create_r.center(), Align2::CENTER_CENTER, "Create", semibold(13.0), if can_create { Color32::BLACK } else { Color32::from_gray(170) });
+        if create_resp.clicked() {
+            if let Some(kind) = st.add_selected {
                 let id = graph.next_id();
                 let world = (rect.center() - rect.min - pan) / zoom;
-                graph.nodes.push(LogicNode { id, kind: *kind, x: world.x, y: world.y, props: default_props(*kind) });
+                graph.nodes.push(LogicNode { id, kind, x: world.x, y: world.y, props: default_props(kind) });
                 st.selected_node = Some(id);
                 st.add_open = false;
+                st.add_query.clear();
+                st.add_selected = None;
             }
-            y += 32.0;
-            if y > panel.max.y - 10.0 { break; }
+        }
+
+        if close_resp.clicked() || (overlay_resp.clicked() && !panel_resp.clicked() && te_resp.as_ref().is_none_or(|r| !r.clicked())) {
+            st.add_open = false;
+        }
+    }
+
+    if fab_resp.clicked() {
+        st.add_open = !st.add_open;
+        st.connect_panel = None;
+        if st.add_open && st.add_selected.is_none() {
+            st.add_selected = NodeKind::allowed_for(group_kind).first().copied();
         }
     }
 
     actions
+}
+
+fn connection_status(graph: &LogicGraph, panel: &ConnectPanel, cand: &LogicNode) -> (bool, &'static str) {
+    let (from_node, from_port, to_node, to_port) = if panel.is_output {
+        let Some(to_port) = cand.kind.inputs().get(0).copied() else { return (false, "Sin entrada"); };
+        (panel.node_id, panel.port.as_str(), cand.id, to_port)
+    } else {
+        let Some(from_port) = cand.kind.outputs().get(0).copied() else { return (false, "Sin salida"); };
+        (cand.id, from_port, panel.node_id, panel.port.as_str())
+    };
+    match graph.can_connect(from_node, from_port, to_node, to_port) {
+        Ok(()) => (true, "Compatible"),
+        Err(e) => (false, e),
+    }
 }
 
 fn create_link(graph: &mut LogicGraph, panel: &ConnectPanel, other_id: u64) {
@@ -319,6 +434,7 @@ fn create_link(graph: &mut LogicGraph, panel: &ConnectPanel, other_id: u64) {
         let from_port = graph.nodes.iter().find(|n| n.id == other_id).and_then(|n| n.kind.outputs().get(0).copied()).unwrap_or("out").to_string();
         (other_id, from_port, panel.node_id, panel.port.clone())
     };
+    if graph.can_connect(from_node, &from_port, to_node, &to_port).is_err() { return; }
     graph.links.retain(|l| !(l.to_node == to_node && l.to_port == to_port));
     graph.links.retain(|l| !(l.from_node == from_node && l.from_port == from_port && l.to_node == to_node && l.to_port == to_port));
     graph.links.push(NodeLink { from_node, from_port, to_node, to_port });
@@ -392,12 +508,13 @@ fn sample_bezier_ctrl(a: Pos2, c1: Pos2, c2: Pos2, b: Pos2, t: f32) -> Pos2 {
     pos2(x, y)
 }
 
-fn default_props(kind: NodeKind) -> NodeProps {
+pub fn default_props(kind: NodeKind) -> NodeProps {
     let mut p = NodeProps::default();
     match kind {
-        NodeKind::OpenScreen | NodeKind::NavigateTo => p.target = "screen".into(),
-        NodeKind::InitModule => { p.module = "module".into(); p.target = "module".into(); }
-        NodeKind::CallFunction => { p.module = "module".into(); p.fn_name = "function".into(); }
+        NodeKind::SetInitialScreen | NodeKind::NavigateTo => { p.target = "screen".into(); }
+        NodeKind::NavigateToScreen => { p.target = "screen".into(); p.clear_history = false; }
+        NodeKind::InitEngine | NodeKind::InitData | NodeKind::InitNetwork => { p.module = "module".into(); p.target = "module".into(); }
+        NodeKind::CallModuleFunction | NodeKind::CallFunction => { p.module = "module".into(); p.fn_name = "function".into(); }
         NodeKind::DefineFunction => p.name = "function".into(),
         NodeKind::OnTap => p.target = "element".into(),
         NodeKind::SetVisible => { p.target = "element".into(); p.visible = true; }
@@ -405,10 +522,16 @@ fn default_props(kind: NodeKind) -> NodeProps {
         NodeKind::SetVariable => { p.name = "var".into(); p.value_type = "text".into(); p.value = "".into(); }
         NodeKind::MathOp => { p.op = "+".into(); p.left = "a".into(); p.right = "b".into(); }
         NodeKind::IfCondition => { p.left = "a".into(); p.cond_op = "==".into(); p.right = "b".into(); }
-        NodeKind::TimerDelay => p.ms = 500,
+        NodeKind::DelayTimer => p.ms = 500,
         NodeKind::SaveLocal | NodeKind::LoadLocal | NodeKind::DeleteLocal => { p.key = "key".into(); p.value = "".into(); }
         NodeKind::HttpRequest => { p.method = "GET".into(); p.url = "https://api.example.com".into(); }
         NodeKind::JsonGetField => { p.field = "data".into(); }
+        NodeKind::RequestPermission | NodeKind::CheckPermission => p.permission = "Camera".into(),
+        NodeKind::SetStatusBar => { p.color = "#0CCE87".into(); p.dark_icons = false; }
+        NodeKind::KeepScreenOn => p.enabled = true,
+        NodeKind::OpenExternalUrl => p.url = "https://example.com".into(),
+        NodeKind::ShareText => p.value = "Hello from VoidX".into(),
+        NodeKind::LogDebug => { p.tag = "Main".into(); p.message = "debug".into(); }
         _ => {}
     }
     p
@@ -416,9 +539,19 @@ fn default_props(kind: NodeKind) -> NodeProps {
 
 fn prop_preview(p: &NodeProps, kind: NodeKind) -> Vec<String> {
     match kind {
-        NodeKind::OpenScreen | NodeKind::NavigateTo => vec![format!("screen: {}", p.target)],
-        NodeKind::InitModule => vec![format!("module: {}", if p.module.is_empty() { &p.target } else { &p.module })],
-        NodeKind::CallFunction => vec![format!("{}::{}", p.module, p.fn_name)],
+        NodeKind::OnReady => vec!["Inicio del contenedor".into()],
+        NodeKind::OnResume | NodeKind::OnPause | NodeKind::OnDestroy | NodeKind::OnBackPressed | NodeKind::ExitApp => vec![kind.description().into()],
+        NodeKind::SetInitialScreen | NodeKind::NavigateTo => vec![format!("screen: {}", p.target)],
+        NodeKind::NavigateToScreen => vec![format!("screen: {}", p.target), format!("clear: {}", p.clear_history)],
+        NodeKind::InitEngine | NodeKind::InitData | NodeKind::InitNetwork => vec![format!("module: {}", if p.module.is_empty() { &p.target } else { &p.module })],
+        NodeKind::CallModuleFunction | NodeKind::CallFunction => vec![format!("{}::{}", p.module, p.fn_name)],
+        NodeKind::RequestPermission | NodeKind::CheckPermission => vec![format!("permiso: {}", p.permission)],
+        NodeKind::SetStatusBar => vec![format!("color: {}", p.color), format!("dark_icons: {}", p.dark_icons)],
+        NodeKind::KeepScreenOn => vec![format!("enabled: {}", p.enabled)],
+        NodeKind::OnDeepLink => vec!["salida: url".into()],
+        NodeKind::OpenExternalUrl => vec![format!("url: {}", p.url)],
+        NodeKind::ShareText => vec![format!("text: {}", p.value)],
+        NodeKind::LogDebug => vec![format!("{}: {}", p.tag, p.message)],
         NodeKind::DefineFunction => vec![format!("name: {}", p.name)],
         NodeKind::OnTap => vec![format!("element: {}", p.target)],
         NodeKind::SetVisible => vec![format!("target: {}", p.target), format!("visible: {}", p.visible)],
@@ -426,11 +559,10 @@ fn prop_preview(p: &NodeProps, kind: NodeKind) -> Vec<String> {
         NodeKind::SetVariable => vec![format!("{}: {} = {}", p.name, p.value_type, p.value)],
         NodeKind::MathOp => vec![format!("{} {} {}", p.left, p.op, p.right)],
         NodeKind::IfCondition => vec![format!("{} {} {}", p.left, p.cond_op, p.right)],
-        NodeKind::TimerDelay => vec![format!("{} ms", p.ms)],
+        NodeKind::DelayTimer => vec![format!("{} ms", p.ms)],
         NodeKind::SaveLocal | NodeKind::LoadLocal | NodeKind::DeleteLocal => vec![format!("key: {}", p.key)],
         NodeKind::HttpRequest => vec![format!("{} {}", p.method, p.url)],
         NodeKind::JsonGetField => vec![format!("field: {}", p.field)],
-        _ => vec![],
     }
 }
 

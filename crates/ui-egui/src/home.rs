@@ -627,23 +627,24 @@ fn node_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize, group: 
 
 fn draw_node_workspace_contents(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize, group: &crate::project::FileGroup, canvas_rect: Rect, embedded_ui: bool) {
     let mut graph = app.ui.project.as_ref().and_then(|p| p.files.get(idx)).and_then(|g| g.logic.clone()).and_then(|v| serde_json::from_value::<crate::logic::LogicGraph>(v).ok()).unwrap_or_default();
+    if group.kind == crate::project::FileGroupKind::Main && graph.nodes.is_empty() {
+        graph.nodes.push(crate::logic::LogicNode { id: 1, kind: crate::logic::NodeKind::OnReady, x: 0.0, y: 0.0, props: crate::node_editor::default_props(crate::logic::NodeKind::OnReady) });
+    }
     let mut st = app.ui.node_editor.clone();
     if st.zoom == 0.0 { st.zoom = 1.0; }
 
-    // Toolbar
+    // Top toolbar (keep actions; add-node FAB is always visible in editor)
     let btn_y = canvas_rect.min.y + 12.0;
-    let add_r = Rect::from_min_size(pos2(canvas_rect.max.x - 110.0, btn_y), vec2(94.0, 30.0));
-    let auto_r = Rect::from_min_size(pos2(canvas_rect.max.x - 230.0, btn_y), vec2(110.0, 30.0));
-    let save_r = Rect::from_min_size(pos2(canvas_rect.max.x - 460.0, btn_y), vec2(220.0, 30.0));
-    for (r, label, id, primary) in [(&add_r, "+ Nodo", "ws_add_node", false), (&auto_r, "Auto-Ordenar", "ws_auto_order", false), (&save_r, "Guardar y volver al World Space", "ws_save_back", true)] {
+    let auto_r = Rect::from_min_size(pos2(canvas_rect.max.x - 130.0, btn_y), vec2(118.0, 36.0));
+    let save_r = Rect::from_min_size(pos2(canvas_rect.max.x - 360.0, btn_y), vec2(220.0, 36.0));
+    for (r, label, id, primary) in [(&auto_r, "Auto-Ordenar", "ws_auto_order", false), (&save_r, "Guardar y volver al World Space", "ws_save_back", true)] {
         let resp = ui.interact(*r, ui.scope_id().with((id, idx, embedded_ui)), Sense::click());
         let bg = if primary { if resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) } } else { if resp.hovered() { t.hover } else { t.field } };
         let fg = if primary { Color32::BLACK } else { t.text };
-        ui.painter().rect_filled(*r, CornerRadius::same(7), bg);
-        ui.painter().rect_stroke(*r, CornerRadius::same(7), Stroke::new(1.0, t.border), StrokeKind::Inside);
+        ui.painter().rect_filled(*r, CornerRadius::same(8), bg);
+        ui.painter().rect_stroke(*r, CornerRadius::same(8), Stroke::new(1.0, t.border), StrokeKind::Inside);
         ui.painter().text(r.center(), Align2::CENTER_CENTER, label, regular(11.5), fg);
         if resp.clicked() {
-            if id == "ws_add_node" { st.add_open = !st.add_open; st.connect_panel = None; }
             if id == "ws_auto_order" { crate::node_editor::auto_order(&mut graph); }
             if id == "ws_save_back" {
                 app.ui.node_editor = st.clone();
