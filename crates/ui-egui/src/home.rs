@@ -278,6 +278,21 @@ fn create_project_dialog(app: &mut FigApp, ui: &mut Ui) {
 
 fn c32(rgb: [u8; 3]) -> Color32 { Color32::from_rgb(rgb[0], rgb[1], rgb[2]) }
 
+fn draw_adaptive_grid(painter: &egui::Painter, rect: Rect, pan: egui::Vec2, zoom: f32, dark: bool) {
+    let mut step = 48.0 * zoom;
+    if step <= 0.0001 { return; }
+    while step < 12.0 { step *= 4.0; }
+    let alpha = if dark { 18 } else { 18 };
+    let grid_col = if dark { Color32::from_rgba_unmultiplied(255,255,255,alpha) } else { Color32::from_rgba_unmultiplied(0,0,0,alpha) };
+    let ox = (pan.x % step + step) % step;
+    let oy = (pan.y % step + step) % step;
+    let mut x = rect.min.x + ox;
+    while x < rect.max.x { painter.line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, grid_col)); x += step; }
+    let mut y = rect.min.y + oy;
+    while y < rect.max.y { painter.line_segment([pos2(rect.min.x, y), pos2(rect.max.x, y)], Stroke::new(1.0, grid_col)); y += step; }
+}
+
+
 pub(crate) fn project_view(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     let Some(ws_idx) = app.ui.project_workspace else {
         world_space(app, ui, t);
@@ -328,16 +343,7 @@ fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     app.ui.world_pan = pan;
     app.ui.world_zoom = zoom;
 
-    let grid_step = 48.0 * zoom;
-    if grid_step >= 16.0 {
-        let grid_col = if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(255,255,255,18) } else { Color32::from_rgba_unmultiplied(0,0,0,18) };
-        let ox = (pan.x % grid_step + grid_step) % grid_step;
-        let oy = (pan.y % grid_step + grid_step) % grid_step;
-        let mut x = rect.min.x + ox;
-        while x < rect.max.x { painter.line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, grid_col)); x += grid_step; }
-        let mut y = rect.min.y + oy;
-        while y < rect.max.y { painter.line_segment([pos2(rect.min.x, y), pos2(rect.max.x, y)], Stroke::new(1.0, grid_col)); y += grid_step; }
-    }
+    draw_adaptive_grid(&painter, rect, pan, zoom, ui.visuals().dark_mode);
 
     let title = app.ui.project.as_ref().map(|p| p.name.clone()).unwrap_or_else(|| "Project".to_string());
     painter.text(pos2(rect.min.x + 20.0, rect.min.y + 24.0), Align2::LEFT_CENTER, format!("World Space — {title}"), semibold(18.0), t.text);
@@ -352,6 +358,14 @@ fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         app.ui.project_workspace = None;
         app.ui.add_group_dialog = None;
         return;
+    }
+
+    let export_rect = Rect::from_min_size(pos2(rect.max.x - 220.0, rect.min.y + 18.0), vec2(200.0, 32.0));
+    let export_resp = ui.interact(export_rect, ui.scope_id().with("ws_export_vxs"), Sense::click());
+    painter.rect_filled(export_rect, CornerRadius::same(8), if export_resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
+    painter.text(export_rect.center(), Align2::CENTER_CENTER, "Exportar / Guardar .vxs", regular(12.0), Color32::BLACK);
+    if export_resp.clicked() {
+        export_project_vxs(app);
     }
 
     let card_w = 360.0 * zoom;
@@ -378,12 +392,17 @@ fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         painter.rect_filled(card_rect, CornerRadius::same(10), c32(style.fill));
         painter.rect_stroke(card_rect, CornerRadius::same(10), Stroke::new(if card_resp.hovered() { 2.0 } else { 1.5 }, c32(style.stroke)), StrokeKind::Inside);
         let pad = 14.0 * zoom;
-        painter.text(pos2(card_rect.min.x + pad, card_rect.min.y + 28.0 * zoom), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&g.name), semibold((16.0 * zoom).max(10.0)), Color32::WHITE);
-        let badge_font = regular((12.0 * zoom).max(9.0));
+        let icon_size = 28.0 * zoom;
+        let icon_rect = Rect::from_min_size(pos2(card_rect.min.x + pad, card_rect.min.y + 16.0 * zoom), vec2(icon_size, icon_size));
+        icons::paint(&painter, icon_rect, g.kind.icon(), c32(style.accent));
+        let text_x = icon_rect.max.x + 10.0 * zoom;
+        painter.text(pos2(text_x, card_rect.min.y + 26.0 * zoom), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&g.name), semibold((16.0 * zoom).max(10.0)), Color32::WHITE);
+        let badge_font = regular((11.0 * zoom).max(8.5));
         let badge_g = painter.layout_no_wrap(style.badge.to_string(), badge_font.clone(), c32(style.badge_text));
-        let badge_rect = Rect::from_min_size(pos2(card_rect.min.x + pad, card_rect.min.y + 48.0 * zoom), vec2(badge_g.size().x + 20.0 * zoom, 24.0 * zoom));
+        let badge_rect = Rect::from_min_size(pos2(text_x, card_rect.min.y + 44.0 * zoom), vec2(badge_g.size().x + 18.0 * zoom, 22.0 * zoom));
         painter.rect_filled(badge_rect, CornerRadius::same((badge_rect.height() / 2.0).round().clamp(0.0, 255.0) as u8), c32(style.badge_fill));
         painter.text(badge_rect.center(), Align2::CENTER_CENTER, style.badge, badge_font, c32(style.badge_text));
+        painter.text(pos2(text_x, card_rect.min.y + 74.0 * zoom), Align2::LEFT_CENTER, g.kind.description(), regular((11.5 * zoom).max(8.5)), Color32::from_rgba_unmultiplied(255, 255, 255, 170));
 
         let edit_font = regular((13.0 * zoom).max(9.0));
         let eg = painter.layout_no_wrap("Editar >".to_string(), edit_font.clone(), c32(style.accent));
@@ -463,14 +482,24 @@ fn add_group_dialog(app: &mut FigApp, ui: &mut Ui) {
                 let btn = egui::Button::new(egui::RichText::new(format!("{label} — {}", kind.description())).size(12.0).color(text_col))
                     .fill(fill).stroke(Stroke::new(1.0, c32(style.stroke))).corner_radius(CornerRadius::same(6));
                 let resp = ui.add_enabled(can_add, btn);
-                if resp.clicked() && can_add { draft.kind = kind; if draft.name.trim().is_empty() { draft.name = crate::project::VoidXProject::default_group_name(kind); } }
+                if resp.clicked() && can_add {
+                    let old_default = crate::project::VoidXProject::default_group_name(draft.kind);
+                    let was_default = draft.name.trim().is_empty() || draft.name.trim() == old_default;
+                    draft.kind = kind;
+                    if was_default { draft.name = crate::project::VoidXProject::default_group_name(kind); }
+                }
             }
             ui.add_space(8.0);
             ui.label(egui::RichText::new("Nombre del archivo").font(semibold(12.0)).color(t.text_secondary));
             ui.add(egui::TextEdit::singleline(&mut draft.name).hint_text("main").desired_width(f32::INFINITY));
+            let sanitized = crate::project::VoidXProject::sanitize_name(&draft.name);
+            let duplicate = app.ui.project.as_ref().is_some_and(|p| p.files.iter().any(|f| crate::project::VoidXProject::sanitize_name(&f.name) == sanitized));
             ui.label(egui::RichText::new(format!("Se mostrará como: {}", crate::project::VoidXProject::display_kt(&draft.name))).size(11.0).color(t.text_secondary));
+            if duplicate {
+                ui.label(egui::RichText::new("Ya existe un archivo con ese nombre").size(11.0).color(t.warning));
+            }
             ui.add_space(8.0);
-            let can_create = !draft.name.trim().is_empty() && app.ui.project.as_ref().is_some_and(|p| p.can_add_kind(draft.kind));
+            let can_create = !draft.name.trim().is_empty() && !duplicate && app.ui.project.as_ref().is_some_and(|p| p.can_add_kind(draft.kind));
             ui.horizontal(|ui| {
                 let create = egui::Button::new(egui::RichText::new("Crear").color(if can_create { Color32::BLACK } else { t.text_tertiary }).strong())
                     .fill(if can_create { Color32::from_rgb(0x0C,0xCE,0x87) } else { t.field }).corner_radius(CornerRadius::same(6));
@@ -549,20 +578,17 @@ pub(crate) fn group_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: us
     }
     app.ui.world_pan = pan; app.ui.world_zoom = zoom;
 
-    let grid_step = 48.0 * zoom;
-    if grid_step >= 16.0 {
-        let grid_col = if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(255,255,255,16) } else { Color32::from_rgba_unmultiplied(0,0,0,16) };
-        let ox = (pan.x % grid_step + grid_step) % grid_step;
-        let oy = (pan.y % grid_step + grid_step) % grid_step;
-        let mut x = rect.min.x + ox; while x < rect.max.x { painter.line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, grid_col)); x += grid_step; }
-        let mut y = rect.min.y + oy; while y < rect.max.y { painter.line_segment([pos2(rect.min.x, y), pos2(rect.max.x, y)], Stroke::new(1.0, grid_col)); y += grid_step; }
-    }
+    draw_adaptive_grid(&painter, rect, pan, zoom, ui.visuals().dark_mode);
 
     let style = group.kind.style();
-    painter.text(pos2(rect.min.x + 20.0, rect.min.y + 24.0), Align2::LEFT_CENTER, format!("{} — {}.kt", group.kind.label(), group.name), semibold(18.0), c32(style.accent));
-    painter.text(pos2(rect.min.x + 20.0, rect.min.y + 48.0), Align2::LEFT_CENTER, "Canvas limpio (pan/zoom). Paleta de nodos: próximo hito.", regular(12.0), t.text_secondary);
+    let header_h = 72.0;
+    let header = Rect::from_min_size(rect.min, vec2(rect.width(), header_h));
+    painter.rect_filled(header, 0.0, if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(20,20,20,220) } else { Color32::from_rgba_unmultiplied(255,255,255,220) });
+    painter.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, t.border));
+    painter.text(pos2(header.min.x + 20.0, header.min.y + 24.0), Align2::LEFT_CENTER, format!("{} — {}", group.kind.label(), crate::project::VoidXProject::display_kt(&group.name)), semibold(18.0), c32(style.accent));
+    painter.text(pos2(header.min.x + 20.0, header.min.y + 48.0), Align2::LEFT_CENTER, "Canvas limpio (pan/zoom). Paleta de nodos: próximo hito.", regular(12.0), t.text_secondary);
 
-    let back = Rect::from_min_size(pos2(rect.max.x - 220.0, rect.min.y + 16.0), vec2(200.0, 32.0));
+    let back = Rect::from_min_size(pos2(header.max.x - 220.0, header.min.y + 20.0), vec2(200.0, 32.0));
     let back_resp = ui.interact(back, ui.scope_id().with(("clean_ws_back", idx)), Sense::click());
     painter.rect_filled(back, CornerRadius::same(8), if back_resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
     painter.text(back.center(), Align2::CENTER_CENTER, "Guardar y volver al World Space", regular(12.0), Color32::BLACK);
@@ -601,6 +627,78 @@ fn capture_active_group_figcraft(app: &mut FigApp) {
     }
 }
 
+
+fn export_project_vxs(app: &mut FigApp) {
+    save_project(app);
+    let Some(project) = app.ui.project.clone() else { return };
+    let name = format!("{}.vxs", crate::project::VoidXProject::sanitize_name(&project.name));
+    let src = app.services.documents_dir().join(&name);
+    let download = std::path::PathBuf::from("/storage/emulated/0/Download").join(&name);
+    let mut out = download.clone();
+    let target = if std::fs::write(&download, std::fs::read(&src).unwrap_or_default()).is_ok() {
+        Some(download)
+    } else {
+        // fallback: keep in documents dir and tell user
+        out = src.clone();
+        None
+    };
+    if let Some(p) = target {
+        app.toast(format!("Proyecto exportado: {}", p.display()));
+    } else {
+        app.toast(format!("Guardado en: {}", out.display()));
+    }
+}
+
+fn vxs_project_files(app: &FigApp) -> Vec<std::path::PathBuf> {
+    let mut dirs = vec![app.services.documents_dir()];
+    dirs.push(std::path::PathBuf::from("/storage/emulated/0/VoidXStudio"));
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(rd) = std::fs::read_dir(dir) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("vxs")) {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn vxs_recents_section(app: &mut FigApp, ui: &mut Ui, t: &Tokens, query: &str) {
+    let mut files = vxs_project_files(app);
+    if files.is_empty() { return; }
+    files.sort_by(|a,b| b.metadata().and_then(|m| m.modified()).ok().cmp(&a.metadata().and_then(|m| m.modified()).ok()));
+    subheading(ui, t, "Proyectos VoidX (.vxs)");
+    for p in files.into_iter().take(12) {
+        let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("proyecto").to_string();
+        let loc = p.parent().and_then(|p| p.to_str()).unwrap_or("").to_string();
+        if !query.is_empty() && !file_matches(&name, &loc, query) { continue; }
+        let row = FileRow {
+            mark: Some((Icon::Assets, Color32::from_rgb(0x0C,0xCE,0x87))),
+            name: &name,
+            ink: t.text,
+            detail: &loc,
+            detail_size: 11.0,
+            detail_ink: t.text_secondary,
+        };
+        if listed(ui, t, ui.scope_id().with(("vxs_recent", &loc, &name)), 36.0, &row) {
+            match crate::project::load(&p) {
+                Ok(project) => {
+                    app.ui.project = Some(project);
+                    app.ui.home = true;
+                    app.ui.project_workspace = None;
+                    app.ui.world_pan = egui::Vec2::ZERO;
+                    app.ui.world_zoom = 1.0;
+                }
+                Err(e) => app.toast(format!("No se pudo abrir .vxs: {e}")),
+            }
+        }
+    }
+    ui.add_space(8.0);
+}
 pub(crate) fn save_project(app: &mut FigApp) {
     capture_active_group_figcraft(app);
     let Some(project) = app.ui.project.clone() else { return };
@@ -678,6 +776,7 @@ fn search_results(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     let query = app.ui.home_view.file_query.trim().to_lowercase();
     let mut count = open_files(app, ui, t, &query);
     count += crate::home_recents::section(app, ui, t, &query);
+    vxs_recents_section(app, ui, t, &query);
 
     let online: Vec<_> = app.session.prefs.online_files.iter().filter(|f| file_matches(&f.name, &f.server, &query)).cloned().collect();
     let mut open_online = None;
@@ -807,6 +906,7 @@ fn recents(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         return;
     }
     crate::home_recents::section(app, ui, t, "");
+    vxs_recents_section(app, ui, t, "");
 }
 
 /// The Open files list: the documents whose name or path has `query` (lower case; all for ""), a

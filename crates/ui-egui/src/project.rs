@@ -82,14 +82,25 @@ impl FileGroupKind {
         }
     }
 
-    /// Short description shown in add modal.
+    /// Short description shown in add modal / card subtitle.
     pub fn description(self) -> &'static str {
         match self {
             FileGroupKind::Main => "Punto de entrada de la app",
-            FileGroupKind::Ui => "Interfaz visual",
+            FileGroupKind::Ui => "Interfaz",
             FileGroupKind::Engine => "Lógica principal",
             FileGroupKind::Data => "Almacenamiento local",
             FileGroupKind::Network => "Network y Database",
+        }
+    }
+
+    /// Icon for the card in World Space.
+    pub fn icon(self) -> crate::icons::Icon {
+        match self {
+            FileGroupKind::Main => crate::icons::Icon::Play,
+            FileGroupKind::Ui => crate::icons::Icon::Frame,
+            FileGroupKind::Engine => crate::icons::Icon::Code,
+            FileGroupKind::Data => crate::icons::Icon::Layers,
+            FileGroupKind::Network => crate::icons::Icon::Online,
         }
     }
 
