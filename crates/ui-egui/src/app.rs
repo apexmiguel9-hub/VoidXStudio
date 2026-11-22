@@ -298,7 +298,8 @@ impl FigApp {
             return;
         }
         if let Some(kind) = home::active_workspace_kind(self) {
-            if kind != crate::project::FileGroupKind::Ui {
+            let ui_logic = kind == crate::project::FileGroupKind::Ui && self.ui.project_ui_logic_mode;
+            if kind != crate::project::FileGroupKind::Ui || ui_logic {
                 home::show_project_workspace(self, ui);
                 dialogs::keys(self, &ctx);
                 dialogs::show(self, &ctx);
@@ -403,17 +404,31 @@ impl FigApp {
                     toolbar::show(self, ui);
                 });
             }
-            if home::active_workspace_kind(self) == Some(crate::project::FileGroupKind::Ui) {
+            if home::active_workspace_kind(self) == Some(crate::project::FileGroupKind::Ui) && !self.ui.project_ui_logic_mode {
                 let rect = ui.max_rect();
-                let bar = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width().min(420.0), 40.0)).translate(egui::vec2(12.0, 12.0));
-                let resp = ui.interact(bar, ui.scope_id().with("ui_ws_back_overlay"), egui::Sense::click());
+                let bar = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width().min(560.0), 40.0)).translate(egui::vec2(12.0, 12.0));
                 let p = ui.painter_at(bar);
-                p.rect_filled(bar, egui::CornerRadius::same(8), if resp.hovered() { egui::Color32::from_rgb(0x1F,0xA8,0x6A) } else { egui::Color32::from_rgb(0x0C,0xCE,0x87) });
-                let label = self.ui.project.as_ref().and_then(|pr| self.ui.project_workspace.and_then(|i| pr.files.get(i))).map(|g| format!("Guardar y volver — {}.kt", g.name)).unwrap_or_else(|| "Guardar y volver al World Space".to_string());
-                p.text(bar.center(), egui::Align2::CENTER_CENTER, label, theme::regular(12.5), egui::Color32::BLACK);
-                if resp.clicked() {
+                p.rect_filled(bar, egui::CornerRadius::same(8), egui::Color32::from_rgba_unmultiplied(20,20,20,220));
+                p.rect_stroke(bar, egui::CornerRadius::same(8), egui::Stroke::new(1.0, egui::Color32::from_rgb(80,80,80)), egui::StrokeKind::Inside);
+                let label = self.ui.project.as_ref().and_then(|pr| self.ui.project_workspace.and_then(|i| pr.files.get(i))).map(|g| format!("UI: {}.kt", g.name)).unwrap_or_else(|| "UI".to_string());
+                p.text(egui::pos2(bar.min.x + 12.0, bar.center().y), egui::Align2::LEFT_CENTER, label, theme::semibold(12.5), egui::Color32::WHITE);
+
+                let logic_r = egui::Rect::from_min_size(egui::pos2(bar.max.x - 360.0, bar.min.y + 6.0), egui::vec2(130.0, 28.0));
+                let back_r = egui::Rect::from_min_size(egui::pos2(bar.max.x - 220.0, bar.min.y + 6.0), egui::vec2(200.0, 28.0));
+                let logic_resp = ui.interact(logic_r, ui.scope_id().with("ui_ws_logic_overlay"), egui::Sense::click());
+                let back_resp = ui.interact(back_r, ui.scope_id().with("ui_ws_back_overlay"), egui::Sense::click());
+                p.rect_filled(logic_r, egui::CornerRadius::same(6), if logic_resp.hovered() { egui::Color32::from_rgb(55,55,62) } else { egui::Color32::from_rgb(40,40,46) });
+                p.text(logic_r.center(), egui::Align2::CENTER_CENTER, "Logic / Nodes", theme::regular(11.5), egui::Color32::WHITE);
+                p.rect_filled(back_r, egui::CornerRadius::same(6), if back_resp.hovered() { egui::Color32::from_rgb(0x1F,0xA8,0x6A) } else { egui::Color32::from_rgb(0x0C,0xCE,0x87) });
+                p.text(back_r.center(), egui::Align2::CENTER_CENTER, "Guardar y volver al World Space", theme::regular(11.0), egui::Color32::BLACK);
+                if logic_resp.clicked() {
+                    home::save_project(self);
+                    self.ui.project_ui_logic_mode = true;
+                }
+                if back_resp.clicked() {
                     home::save_project(self);
                     self.ui.project_workspace = None;
+                    self.ui.project_ui_logic_mode = false;
                     self.ui.home = true;
                 }
             }

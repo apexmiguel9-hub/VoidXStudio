@@ -495,6 +495,8 @@ pub struct UiState {
     pub project_workspace: Option<usize>,
     /// Node editor transient state for current workspace.
     pub node_editor: crate::node_editor::NodeEditorState,
+    /// UI workspace: show Logic/Nodes panel instead of FigCraft canvas.
+    pub project_ui_logic_mode: bool,
     /// How the window's title bar is drawn (the desktop app sets it when it opens the window).
     pub title_bar: TitleBar,
     /// Every icon on one screen, for reviewing the set (control channel `ui.set {iconGallery}`).
@@ -710,6 +712,7 @@ impl Default for UiState {
             world_drag: None,
             project_workspace: None,
             node_editor: crate::node_editor::NodeEditorState::default(),
+            project_ui_logic_mode: false,
             title_bar: TitleBar::Native,
             icon_gallery: false,
             toast: None,

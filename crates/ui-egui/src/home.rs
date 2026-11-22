@@ -462,6 +462,8 @@ pub(crate) fn open_group_workspace(app: &mut FigApp, idx: usize) {
         if let Some(g) = p.files.get_mut(idx) { g.visual = Some(visual.clone()); }
     }
 
+    app.ui.project_ui_logic_mode = false;
+    app.ui.node_editor = crate::node_editor::NodeEditorState::default();
     if group.kind.opens_figcraft() {
         let mut loaded = false;
         if let Some(bytes) = group.visual_data.as_ref() {
@@ -552,33 +554,58 @@ pub(crate) fn group_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: us
     let Some(group) = project.files.get(idx).cloned() else { app.ui.project_workspace = None; return; };
 
     if group.kind == crate::project::FileGroupKind::Ui {
-        // UI workspace uses normal FigCraft editor; draw a top overlay bar to return.
-        let rect = ui.max_rect();
-        let bar_h = 40.0;
-        let bar_rect = Rect::from_min_size(rect.min, vec2(rect.width(), bar_h));
-        let painter = ui.painter_at(bar_rect);
-        painter.rect_filled(bar_rect, 0.0, t.panel);
-        painter.rect_stroke(bar_rect, 0.0, Stroke::new(1.0, t.border), StrokeKind::Inside);
-        painter.text(pos2(bar_rect.min.x + 16.0, bar_rect.center().y), Align2::LEFT_CENTER, format!("UI: {}.kt", group.name), semibold(13.0), t.text);
-        let back = Rect::from_min_size(pos2(bar_rect.max.x - 220.0, bar_rect.min.y + 6.0), vec2(200.0, 28.0));
-        let resp = ui.interact(back, ui.scope_id().with("ui_ws_back"), Sense::click());
-        painter.rect_filled(back, CornerRadius::same(6), if resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
-        painter.text(back.center(), Align2::CENTER_CENTER, "Guardar y volver al World Space", regular(11.5), Color32::BLACK);
-        if resp.clicked() {
-            save_project(app);
-            app.ui.project_workspace = None;
-            app.ui.home = true;
-        }
-        // The actual editor is rendered by app frame; we only reserve no space here.
+        ui_workspace_overlay(app, ui, t, idx, &group);
         return;
     }
 
-    // Node editor workspace for Main/Engine/Data/Network (and reusable for UI logic mode later)
+    node_workspace(app, ui, t, idx, &group);
+}
+
+fn ui_workspace_overlay(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize, group: &crate::project::FileGroup) {
     let rect = ui.max_rect();
-    let style = group.kind.style();
+    let bar_h = 44.0;
+    let bar_rect = Rect::from_min_size(rect.min, vec2(rect.width(), bar_h));
+    let painter = ui.painter_at(bar_rect);
+    painter.rect_filled(bar_rect, 0.0, if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(20,20,20,235) } else { Color32::from_rgba_unmultiplied(250,250,250,235) });
+    painter.rect_stroke(bar_rect, 0.0, Stroke::new(1.0, t.border), StrokeKind::Inside);
+    painter.text(pos2(bar_rect.min.x + 16.0, bar_rect.center().y), Align2::LEFT_CENTER, format!("UI: {}", crate::project::VoidXProject::display_kt(&group.name)), semibold(13.0), t.text);
+
+    let toggle = Rect::from_min_size(pos2(bar_rect.max.x - 390.0, bar_rect.min.y + 8.0), vec2(150.0, 28.0));
+    let toggle_resp = ui.interact(toggle, ui.scope_id().with("ui_logic_toggle"), Sense::click());
+    let on = app.ui.project_ui_logic_mode;
+    painter.rect_filled(toggle, CornerRadius::same(6), if on { c32(group.kind.style().badge_fill) } else { t.field });
+    painter.rect_stroke(toggle, CornerRadius::same(6), Stroke::new(1.0, c32(group.kind.style().stroke)), StrokeKind::Inside);
+    painter.text(toggle.center(), Align2::CENTER_CENTER, if on { "Diseño / UI" } else { "Logic / Nodes" }, regular(11.5), if on { c32(group.kind.style().badge_text) } else { t.text });
+    if toggle_resp.clicked() {
+        save_project(app); // persist figcraft/logic before switching modes
+        app.ui.project_ui_logic_mode = !app.ui.project_ui_logic_mode;
+    }
+
+    let back = Rect::from_min_size(pos2(bar_rect.max.x - 220.0, bar_rect.min.y + 8.0), vec2(200.0, 28.0));
+    let resp = ui.interact(back, ui.scope_id().with("ui_ws_back"), Sense::click());
+    painter.rect_filled(back, CornerRadius::same(6), if resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
+    painter.text(back.center(), Align2::CENTER_CENTER, "Guardar y volver al World Space", regular(11.5), Color32::BLACK);
+    if resp.clicked() {
+        save_project(app);
+        app.ui.project_workspace = None;
+        app.ui.project_ui_logic_mode = false;
+        app.ui.home = true;
+        return;
+    }
+
+    if app.ui.project_ui_logic_mode {
+        let canvas_rect = Rect::from_min_max(pos2(rect.min.x, rect.min.y + bar_h), rect.max);
+        ui.painter().rect_filled(canvas_rect, 0.0, if ui.visuals().dark_mode { Color32::from_rgb(0x18,0x18,0x18) } else { Color32::from_rgb(0xFA,0xFA,0xFA) });
+        draw_node_workspace_contents(app, ui, t, idx, group, canvas_rect, true);
+    }
+}
+
+fn node_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize, group: &crate::project::FileGroup) {
+    let rect = ui.max_rect();
     let header_h = 72.0;
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), header_h));
     let canvas_rect = Rect::from_min_max(pos2(rect.min.x, rect.min.y + header_h), rect.max);
+    let style = group.kind.style();
     ui.painter().rect_filled(header, 0.0, if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(20,20,20,220) } else { Color32::from_rgba_unmultiplied(255,255,255,220) });
     ui.painter().line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, t.border));
     ui.painter().text(pos2(header.min.x + 20.0, header.min.y + 24.0), Align2::LEFT_CENTER, format!("{} — {}", group.kind.label(), crate::project::VoidXProject::display_kt(&group.name)), semibold(18.0), c32(style.accent));
@@ -595,9 +622,41 @@ pub(crate) fn group_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: us
         return;
     }
 
+    draw_node_workspace_contents(app, ui, t, idx, group, canvas_rect, false);
+}
+
+fn draw_node_workspace_contents(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize, group: &crate::project::FileGroup, canvas_rect: Rect, embedded_ui: bool) {
     let mut graph = app.ui.project.as_ref().and_then(|p| p.files.get(idx)).and_then(|g| g.logic.clone()).and_then(|v| serde_json::from_value::<crate::logic::LogicGraph>(v).ok()).unwrap_or_default();
     let mut st = app.ui.node_editor.clone();
     if st.zoom == 0.0 { st.zoom = 1.0; }
+
+    // Toolbar
+    let btn_y = canvas_rect.min.y + 12.0;
+    let add_r = Rect::from_min_size(pos2(canvas_rect.max.x - 110.0, btn_y), vec2(94.0, 30.0));
+    let auto_r = Rect::from_min_size(pos2(canvas_rect.max.x - 230.0, btn_y), vec2(110.0, 30.0));
+    let save_r = Rect::from_min_size(pos2(canvas_rect.max.x - 460.0, btn_y), vec2(220.0, 30.0));
+    for (r, label, id, primary) in [(&add_r, "+ Nodo", "ws_add_node", false), (&auto_r, "Auto-Ordenar", "ws_auto_order", false), (&save_r, "Guardar y volver al World Space", "ws_save_back", true)] {
+        let resp = ui.interact(*r, ui.scope_id().with((id, idx, embedded_ui)), Sense::click());
+        let bg = if primary { if resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) } } else { if resp.hovered() { t.hover } else { t.field } };
+        let fg = if primary { Color32::BLACK } else { t.text };
+        ui.painter().rect_filled(*r, CornerRadius::same(7), bg);
+        ui.painter().rect_stroke(*r, CornerRadius::same(7), Stroke::new(1.0, t.border), StrokeKind::Inside);
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, label, regular(11.5), fg);
+        if resp.clicked() {
+            if id == "ws_add_node" { st.add_open = !st.add_open; st.connect_panel = None; }
+            if id == "ws_auto_order" { crate::node_editor::auto_order(&mut graph); }
+            if id == "ws_save_back" {
+                app.ui.node_editor = st.clone();
+                if let Some(p) = app.ui.project.as_mut() { if let Some(g) = p.files.get_mut(idx) { g.logic = serde_json::to_value(&graph).ok(); } }
+                save_project(app);
+                app.ui.project_workspace = None;
+                app.ui.project_ui_logic_mode = false;
+                app.ui.home = true;
+                return;
+            }
+        }
+    }
+
     ui.scope_builder(egui::UiBuilder::new().max_rect(canvas_rect), |ui| {
         crate::node_editor::show(ui, t, group.kind, &mut graph, &mut st);
     });

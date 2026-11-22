@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 pub struct LogicGraph {
     #[serde(default)]
     pub nodes: Vec<LogicNode>,
-    #[serde(default)]
-    pub wires: Vec<NodeWire>,
+    #[serde(default, alias = "wires")]
+    pub links: Vec<NodeLink>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -22,12 +22,15 @@ pub struct LogicNode {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct NodeWire {
+pub struct NodeLink {
     pub from_node: u64,
     pub from_port: String,
     pub to_node: u64,
     pub to_port: String,
 }
+
+// Back-compat alias used in older code paths.
+pub type NodeWire = NodeLink;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -44,7 +47,6 @@ pub enum NodeKind {
     CallFunction,
     // Engine
     DefineFunction,
-    Variable,
     SetVariable,
     MathOp,
     IfCondition,
@@ -56,8 +58,6 @@ pub enum NodeKind {
     // Network
     HttpRequest,
     JsonGetField,
-    OnResponse,
-    OnError,
 }
 
 impl NodeKind {
@@ -72,7 +72,6 @@ impl NodeKind {
             NodeKind::NavigateTo => "Navigate To",
             NodeKind::CallFunction => "Call Function",
             NodeKind::DefineFunction => "Define Function",
-            NodeKind::Variable => "Variable",
             NodeKind::SetVariable => "Set Variable",
             NodeKind::MathOp => "Math Op",
             NodeKind::IfCondition => "If Condition",
@@ -82,8 +81,6 @@ impl NodeKind {
             NodeKind::DeleteLocal => "Delete Local",
             NodeKind::HttpRequest => "HTTP Request",
             NodeKind::JsonGetField => "JSON Get Field",
-            NodeKind::OnResponse => "On Response",
-            NodeKind::OnError => "On Error",
         }
     }
 
@@ -92,29 +89,29 @@ impl NodeKind {
         match kind {
             G::Main => &[NodeKind::OnAppStart, NodeKind::OpenScreen, NodeKind::InitModule],
             G::Ui => &[NodeKind::OnTap, NodeKind::SetVisible, NodeKind::SetText, NodeKind::NavigateTo, NodeKind::CallFunction],
-            G::Engine => &[NodeKind::DefineFunction, NodeKind::Variable, NodeKind::SetVariable, NodeKind::MathOp, NodeKind::IfCondition, NodeKind::TimerDelay],
+            G::Engine => &[NodeKind::DefineFunction, NodeKind::SetVariable, NodeKind::MathOp, NodeKind::IfCondition, NodeKind::TimerDelay],
             G::Data => &[NodeKind::SaveLocal, NodeKind::LoadLocal, NodeKind::DeleteLocal],
-            G::Network => &[NodeKind::HttpRequest, NodeKind::JsonGetField, NodeKind::OnResponse, NodeKind::OnError],
+            G::Network => &[NodeKind::HttpRequest, NodeKind::JsonGetField],
         }
     }
 
     pub fn inputs(self) -> &'static [&'static str] {
         match self {
-            NodeKind::OnAppStart => &[],
-            NodeKind::DefineFunction | NodeKind::OnTap | NodeKind::OnResponse | NodeKind::OnError => &[],
-            NodeKind::IfCondition => &["in", "value"],
-            NodeKind::MathOp => &["a", "b"],
-            NodeKind::JsonGetField => &["json"],
+            NodeKind::OnAppStart | NodeKind::OnTap | NodeKind::DefineFunction => &[],
+            NodeKind::IfCondition => &["in"],
+            NodeKind::MathOp => &["in"],
+            NodeKind::JsonGetField => &["in"],
             _ => &["in"],
         }
     }
 
     pub fn outputs(self) -> &'static [&'static str] {
         match self {
-            NodeKind::IfCondition => &["true", "false"],
-            NodeKind::HttpRequest => &["on_response", "on_error"],
-            NodeKind::MathOp | NodeKind::Variable | NodeKind::LoadLocal | NodeKind::JsonGetField => &["value"],
-            NodeKind::OnAppStart | NodeKind::DefineFunction | NodeKind::OnTap | NodeKind::OnResponse | NodeKind::OnError => &["out"],
+            NodeKind::IfCondition => &["True", "False"],
+            NodeKind::HttpRequest => &["OnSuccess", "OnError"],
+            NodeKind::OnAppStart | NodeKind::OnTap | NodeKind::DefineFunction => &["out"],
+            NodeKind::JsonGetField => &["value"],
+            NodeKind::MathOp => &["value"],
             _ => &["out"],
         }
     }
@@ -128,12 +125,17 @@ pub struct NodeProps {
     #[serde(default)] pub value: String,
     #[serde(default)] pub value_type: String, // text|number|bool
     #[serde(default)] pub op: String, // + - * /
+    #[serde(default)] pub left: String,
+    #[serde(default)] pub right: String,
+    #[serde(default)] pub cond_op: String, // == != > < >= <=
     #[serde(default)] pub method: String, // GET|POST
     #[serde(default)] pub url: String,
     #[serde(default)] pub body: String,
     #[serde(default)] pub field: String,
     #[serde(default)] pub ms: i32,
     #[serde(default)] pub visible: bool,
+    #[serde(default)] pub module: String,
+    #[serde(default)] pub fn_name: String,
 }
 
 impl LogicGraph {
