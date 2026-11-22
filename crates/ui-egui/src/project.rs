@@ -340,6 +340,7 @@ pub fn load(path: &Path) -> Result<VoidXProject, String> {
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     let mut project: Option<VoidXProject> = None;
     let mut visuals: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+    let mut logics: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
@@ -350,6 +351,10 @@ pub fn load(path: &Path) -> Result<VoidXProject, String> {
         } else if let Some(file_name) = name.strip_prefix("files/") {
             if file_name.ends_with(".figcraft") || file_name.ends_with(".fig") {
                 visuals.insert(file_name.to_string(), data);
+            } else if file_name.ends_with(".logic.json") {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&data) {
+                    logics.insert(file_name.to_string(), v);
+                }
             }
         }
     }
@@ -357,6 +362,10 @@ pub fn load(path: &Path) -> Result<VoidXProject, String> {
     for g in &mut project.files {
         if let Some(v) = &g.visual {
             g.visual_data = visuals.remove(v);
+        }
+        let lname = format!("{}.logic.json", VoidXProject::sanitize_name(&g.name));
+        if let Some(v) = logics.remove(&lname) {
+            g.logic = Some(v);
         }
     }
     Ok(project)

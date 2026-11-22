@@ -26,6 +26,8 @@ pub mod icons;
 pub mod live;
 pub mod menus;
 pub mod pending_open;
+pub mod logic;
+pub mod node_editor;
 pub mod project;
 pub mod popover;
 pub mod present;
@@ -491,6 +493,8 @@ pub struct UiState {
     pub world_drag: Option<usize>,
     /// Open project workspace: group index being edited.
     pub project_workspace: Option<usize>,
+    /// Node editor transient state for current workspace.
+    pub node_editor: crate::node_editor::NodeEditorState,
     /// How the window's title bar is drawn (the desktop app sets it when it opens the window).
     pub title_bar: TitleBar,
     /// Every icon on one screen, for reviewing the set (control channel `ui.set {iconGallery}`).
@@ -705,6 +709,7 @@ impl Default for UiState {
             world_zoom: 1.0,
             world_drag: None,
             project_workspace: None,
+            node_editor: crate::node_editor::NodeEditorState::default(),
             title_bar: TitleBar::Native,
             icon_gallery: false,
             toast: None,

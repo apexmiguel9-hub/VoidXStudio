@@ -396,17 +396,15 @@ fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         let icon_rect = Rect::from_min_size(pos2(card_rect.min.x + pad, card_rect.min.y + 16.0 * zoom), vec2(icon_size, icon_size));
         icons::paint(&painter, icon_rect, g.kind.icon(), c32(style.accent));
         let text_x = icon_rect.max.x + 10.0 * zoom;
-        painter.text(pos2(text_x, card_rect.min.y + 26.0 * zoom), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&g.name), semibold(16.0 * zoom), Color32::WHITE);
-        let badge_font = regular(11.0 * zoom);
+        painter.text(pos2(text_x, card_rect.min.y + 26.0 * zoom), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&g.name), semibold((16.0 * zoom).max(4.0)), Color32::WHITE);
+        let badge_font = regular((11.0 * zoom).max(4.0));
         let badge_g = painter.layout_no_wrap(style.badge.to_string(), badge_font.clone(), c32(style.badge_text));
         let badge_rect = Rect::from_min_size(pos2(text_x, card_rect.min.y + 44.0 * zoom), vec2(badge_g.size().x + 18.0 * zoom, 22.0 * zoom));
         painter.rect_filled(badge_rect, CornerRadius::same((badge_rect.height() / 2.0).round().clamp(0.0, 255.0) as u8), c32(style.badge_fill));
         painter.text(badge_rect.center(), Align2::CENTER_CENTER, style.badge, badge_font, c32(style.badge_text));
-        if zoom >= 0.55 {
-            painter.text(pos2(text_x, card_rect.min.y + 74.0 * zoom), Align2::LEFT_CENTER, g.kind.description(), regular(11.5 * zoom), Color32::from_rgba_unmultiplied(255, 255, 255, 170));
-        }
+        painter.text(pos2(text_x, card_rect.min.y + 74.0 * zoom), Align2::LEFT_CENTER, g.kind.description(), regular((11.5 * zoom).max(4.0)), Color32::from_rgba_unmultiplied(255, 255, 255, 170));
 
-        let edit_font = regular(13.0 * zoom);
+        let edit_font = regular((13.0 * zoom).max(4.0));
         let eg = painter.layout_no_wrap("Editar >".to_string(), edit_font.clone(), c32(style.accent));
         let er = Rect::from_min_size(pos2(card_rect.max.x - eg.size().x - 18.0*zoom, card_rect.max.y - 30.0*zoom), eg.size() + vec2(8.0*zoom, 6.0*zoom));
         let edit_resp = ui.interact(er, ui.scope_id().with(("ws_edit", i)), Sense::click());
@@ -419,13 +417,13 @@ fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         let del_resp = ui.interact(del_rect, ui.scope_id().with(("ws_del", i)), Sense::click());
         let del_bg = if del_resp.hovered() { Color32::from_rgba_unmultiplied(255, 80, 80, 45) } else { Color32::TRANSPARENT };
         painter.rect_filled(del_rect, CornerRadius::same(4), del_bg);
-        painter.text(del_rect.center(), Align2::CENTER_CENTER, "×", regular(16.0 * zoom), if del_resp.hovered() { Color32::from_rgb(255,100,100) } else { Color32::from_rgba_unmultiplied(255,255,255,140) });
+        painter.text(del_rect.center(), Align2::CENTER_CENTER, "×", regular((16.0 * zoom).max(4.0)), if del_resp.hovered() { Color32::from_rgb(255,100,100) } else { Color32::from_rgba_unmultiplied(255,255,255,140) });
         if del_resp.clicked() {
             delete_project_group(app, i);
         }
 
         if g.kind.anchored() {
-            painter.text(pos2(card_rect.max.x - pad - del_size - 8.0*zoom, card_rect.min.y + 20.0*zoom), Align2::RIGHT_CENTER, "PIN", regular(10.0*zoom), t.text_secondary);
+            painter.text(pos2(card_rect.max.x - pad - del_size - 8.0*zoom, card_rect.min.y + 20.0*zoom), Align2::RIGHT_CENTER, "PIN", regular((10.0*zoom).max(4.0)), t.text_secondary);
         }
     }
     app.ui.world_drag = drag_idx;
@@ -575,55 +573,39 @@ pub(crate) fn group_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: us
         return;
     }
 
-    // Clean canvas for Main/Engine/Data/Network
+    // Node editor workspace for Main/Engine/Data/Network (and reusable for UI logic mode later)
     let rect = ui.max_rect();
-    let resp = ui.interact(rect, ui.scope_id().with(("clean_ws", idx)), Sense::click_and_drag());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, if ui.visuals().dark_mode { Color32::from_rgb(0x18,0x18,0x18) } else { Color32::from_rgb(0xFA,0xFA,0xFA) });
-    let mut pan = app.ui.world_pan;
-    let mut zoom = app.ui.world_zoom.clamp(0.25, 4.0);
-    let pointer_in = resp.hover_pos().unwrap_or(rect.center());
-    let scroll = ui.input(|i| i.smooth_scroll_delta);
-    let pinch = ui.input(|i| i.zoom_delta());
-    if let Some(mt) = ui.input(|i| i.multi_touch()) {
-        if (mt.zoom_delta - 1.0).abs() > 0.001 {
-            let old = zoom; zoom = (zoom * mt.zoom_delta).clamp(0.25, 4.0);
-            let before = (mt.start_pos - rect.min - pan) / old; pan = mt.start_pos - rect.min - before * zoom;
-        }
-        pan += mt.translation_delta;
-    } else if resp.dragged() {
-        pan += resp.drag_delta();
-    } else if resp.hovered() {
-        if (pinch - 1.0).abs() > 0.001 {
-            let old = zoom; zoom = (zoom * pinch).clamp(0.25, 4.0);
-            let before = (pointer_in - rect.min - pan) / old; pan = pointer_in - rect.min - before * zoom;
-        } else if scroll != egui::Vec2::ZERO {
-            if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-                let old = zoom; let factor = (scroll.y / 200.0).exp(); zoom = (zoom * factor).clamp(0.25, 4.0);
-                let before = (pointer_in - rect.min - pan) / old; pan = pointer_in - rect.min - before * zoom;
-            } else { pan += scroll; }
-        }
-    }
-    app.ui.world_pan = pan; app.ui.world_zoom = zoom;
-
-    draw_adaptive_grid(&painter, rect, pan, zoom, ui.visuals().dark_mode);
-
     let style = group.kind.style();
     let header_h = 72.0;
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), header_h));
-    painter.rect_filled(header, 0.0, if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(20,20,20,220) } else { Color32::from_rgba_unmultiplied(255,255,255,220) });
-    painter.line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, t.border));
-    painter.text(pos2(header.min.x + 20.0, header.min.y + 24.0), Align2::LEFT_CENTER, format!("{} — {}", group.kind.label(), crate::project::VoidXProject::display_kt(&group.name)), semibold(18.0), c32(style.accent));
-    painter.text(pos2(header.min.x + 20.0, header.min.y + 48.0), Align2::LEFT_CENTER, "Canvas limpio (pan/zoom). Paleta de nodos: próximo hito.", regular(12.0), t.text_secondary);
+    let canvas_rect = Rect::from_min_max(pos2(rect.min.x, rect.min.y + header_h), rect.max);
+    ui.painter().rect_filled(header, 0.0, if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(20,20,20,220) } else { Color32::from_rgba_unmultiplied(255,255,255,220) });
+    ui.painter().line_segment([header.left_bottom(), header.right_bottom()], Stroke::new(1.0, t.border));
+    ui.painter().text(pos2(header.min.x + 20.0, header.min.y + 24.0), Align2::LEFT_CENTER, format!("{} — {}", group.kind.label(), crate::project::VoidXProject::display_kt(&group.name)), semibold(18.0), c32(style.accent));
+    ui.painter().text(pos2(header.min.x + 20.0, header.min.y + 48.0), Align2::LEFT_CENTER, "Editor de nodos (IR visual)", regular(12.0), t.text_secondary);
 
     let back = Rect::from_min_size(pos2(header.max.x - 220.0, header.min.y + 20.0), vec2(200.0, 32.0));
-    let back_resp = ui.interact(back, ui.scope_id().with(("clean_ws_back", idx)), Sense::click());
-    painter.rect_filled(back, CornerRadius::same(8), if back_resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
-    painter.text(back.center(), Align2::CENTER_CENTER, "Guardar y volver al World Space", regular(12.0), Color32::BLACK);
+    let back_resp = ui.interact(back, ui.scope_id().with(("node_ws_back", idx)), Sense::click());
+    ui.painter().rect_filled(back, CornerRadius::same(8), if back_resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
+    ui.painter().text(back.center(), Align2::CENTER_CENTER, "Guardar y volver al World Space", regular(12.0), Color32::BLACK);
     if back_resp.clicked() {
         save_project(app);
         app.ui.project_workspace = None;
         app.ui.home = true;
+        return;
+    }
+
+    let mut graph = app.ui.project.as_ref().and_then(|p| p.files.get(idx)).and_then(|g| g.logic.clone()).and_then(|v| serde_json::from_value::<crate::logic::LogicGraph>(v).ok()).unwrap_or_default();
+    let mut st = app.ui.node_editor.clone();
+    if st.zoom == 0.0 { st.zoom = 1.0; }
+    ui.scope_builder(egui::UiBuilder::new().max_rect(canvas_rect), |ui| {
+        crate::node_editor::show(ui, t, group.kind, &mut graph, &mut st);
+    });
+    app.ui.node_editor = st;
+    if let Some(p) = app.ui.project.as_mut() {
+        if let Some(g) = p.files.get_mut(idx) {
+            g.logic = serde_json::to_value(&graph).ok();
+        }
     }
 }
 
@@ -780,8 +762,18 @@ fn draw_vxs_thumbnail(painter: &egui::Painter, rect: Rect, project: &crate::proj
         let c = pos2(ox + f.x * scale, oy + f.y * scale);
         let r = Rect::from_center_size(c, vec2(360.0 * scale, 110.0 * scale));
         let st = f.kind.style();
-        painter.rect_filled(r, CornerRadius::same(2), c32(st.fill));
-        painter.rect_stroke(r, CornerRadius::same(2), Stroke::new(1.0, c32(st.stroke)), StrokeKind::Inside);
+        painter.rect_filled(r, CornerRadius::same((4.0*scale).max(1.0) as u8), c32(st.fill));
+        painter.rect_stroke(r, CornerRadius::same((4.0*scale).max(1.0) as u8), Stroke::new(1.0, c32(st.stroke)), StrokeKind::Inside);
+        let icon_size = (28.0 * scale).max(6.0);
+        let icon_rect = Rect::from_min_size(pos2(r.min.x + 10.0*scale, r.min.y + 10.0*scale), vec2(icon_size, icon_size));
+        icons::paint(painter, icon_rect, f.kind.icon(), c32(st.accent));
+        let tx = icon_rect.max.x + 8.0*scale;
+        painter.text(pos2(tx, r.min.y + 20.0*scale), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&f.name), semibold((14.0*scale).max(4.0)), Color32::WHITE);
+        let badge_font = regular((10.0*scale).max(4.0));
+        let bg = painter.layout_no_wrap(st.badge.to_string(), badge_font.clone(), c32(st.badge_text));
+        let br = Rect::from_min_size(pos2(tx, r.min.y + 38.0*scale), vec2(bg.size().x + 12.0*scale, (18.0*scale).max(6.0)));
+        painter.rect_filled(br, CornerRadius::same((br.height()/2.0).max(1.0) as u8), c32(st.badge_fill));
+        painter.text(br.center(), Align2::CENTER_CENTER, st.badge, badge_font, c32(st.badge_text));
     }
 }
 pub(crate) fn save_project(app: &mut FigApp) {
