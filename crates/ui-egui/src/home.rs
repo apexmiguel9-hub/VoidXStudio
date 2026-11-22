@@ -396,22 +396,36 @@ fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         let icon_rect = Rect::from_min_size(pos2(card_rect.min.x + pad, card_rect.min.y + 16.0 * zoom), vec2(icon_size, icon_size));
         icons::paint(&painter, icon_rect, g.kind.icon(), c32(style.accent));
         let text_x = icon_rect.max.x + 10.0 * zoom;
-        painter.text(pos2(text_x, card_rect.min.y + 26.0 * zoom), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&g.name), semibold((16.0 * zoom).max(10.0)), Color32::WHITE);
-        let badge_font = regular((11.0 * zoom).max(8.5));
+        painter.text(pos2(text_x, card_rect.min.y + 26.0 * zoom), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&g.name), semibold(16.0 * zoom), Color32::WHITE);
+        let badge_font = regular(11.0 * zoom);
         let badge_g = painter.layout_no_wrap(style.badge.to_string(), badge_font.clone(), c32(style.badge_text));
         let badge_rect = Rect::from_min_size(pos2(text_x, card_rect.min.y + 44.0 * zoom), vec2(badge_g.size().x + 18.0 * zoom, 22.0 * zoom));
         painter.rect_filled(badge_rect, CornerRadius::same((badge_rect.height() / 2.0).round().clamp(0.0, 255.0) as u8), c32(style.badge_fill));
         painter.text(badge_rect.center(), Align2::CENTER_CENTER, style.badge, badge_font, c32(style.badge_text));
-        painter.text(pos2(text_x, card_rect.min.y + 74.0 * zoom), Align2::LEFT_CENTER, g.kind.description(), regular((11.5 * zoom).max(8.5)), Color32::from_rgba_unmultiplied(255, 255, 255, 170));
+        if zoom >= 0.55 {
+            painter.text(pos2(text_x, card_rect.min.y + 74.0 * zoom), Align2::LEFT_CENTER, g.kind.description(), regular(11.5 * zoom), Color32::from_rgba_unmultiplied(255, 255, 255, 170));
+        }
 
-        let edit_font = regular((13.0 * zoom).max(9.0));
+        let edit_font = regular(13.0 * zoom);
         let eg = painter.layout_no_wrap("Editar >".to_string(), edit_font.clone(), c32(style.accent));
         let er = Rect::from_min_size(pos2(card_rect.max.x - eg.size().x - 18.0*zoom, card_rect.max.y - 30.0*zoom), eg.size() + vec2(8.0*zoom, 6.0*zoom));
         let edit_resp = ui.interact(er, ui.scope_id().with(("ws_edit", i)), Sense::click());
         painter.text(er.left_top(), Align2::LEFT_TOP, "Editar >", edit_font, if edit_resp.hovered() { Color32::WHITE } else { c32(style.accent) });
         if edit_resp.clicked() { open_ws = Some(i); }
+
+        // Delete button
+        let del_size = 22.0 * zoom;
+        let del_rect = Rect::from_min_size(pos2(card_rect.max.x - pad - del_size, card_rect.min.y + 10.0 * zoom), vec2(del_size, del_size));
+        let del_resp = ui.interact(del_rect, ui.scope_id().with(("ws_del", i)), Sense::click());
+        let del_bg = if del_resp.hovered() { Color32::from_rgba_unmultiplied(255, 80, 80, 45) } else { Color32::TRANSPARENT };
+        painter.rect_filled(del_rect, CornerRadius::same(4), del_bg);
+        painter.text(del_rect.center(), Align2::CENTER_CENTER, "×", regular(16.0 * zoom), if del_resp.hovered() { Color32::from_rgb(255,100,100) } else { Color32::from_rgba_unmultiplied(255,255,255,140) });
+        if del_resp.clicked() {
+            delete_project_group(app, i);
+        }
+
         if g.kind.anchored() {
-            painter.text(pos2(card_rect.max.x - pad, card_rect.min.y + 20.0*zoom), Align2::RIGHT_CENTER, "PIN", regular((10.0*zoom).max(8.0)), t.text_secondary);
+            painter.text(pos2(card_rect.max.x - pad - del_size - 8.0*zoom, card_rect.min.y + 20.0*zoom), Align2::RIGHT_CENTER, "PIN", regular(10.0*zoom), t.text_secondary);
         }
     }
     app.ui.world_drag = drag_idx;
@@ -427,6 +441,20 @@ fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
     }
 }
 
+
+fn delete_project_group(app: &mut FigApp, idx: usize) {
+    let Some(project) = app.ui.project.as_mut() else { return };
+    if idx >= project.files.len() { return; }
+    // remove group; Main can be removed too (user asked optional confirm - keep simple for now)
+    project.files.remove(idx);
+    if app.ui.project_workspace == Some(idx) {
+        app.ui.project_workspace = None;
+        app.ui.home = true;
+    } else if let Some(ws) = app.ui.project_workspace {
+        if ws > idx { app.ui.project_workspace = Some(ws - 1); }
+    }
+    save_project(app);
+}
 pub(crate) fn open_group_workspace(app: &mut FigApp, idx: usize) {
     let Some(project) = app.ui.project.as_ref() else { return };
     let Some(group) = project.files.get(idx).cloned() else { return };
@@ -671,33 +699,90 @@ fn vxs_recents_section(app: &mut FigApp, ui: &mut Ui, t: &Tokens, query: &str) {
     let mut files = vxs_project_files(app);
     if files.is_empty() { return; }
     files.sort_by(|a,b| b.metadata().and_then(|m| m.modified()).ok().cmp(&a.metadata().and_then(|m| m.modified()).ok()));
-    subheading(ui, t, "Proyectos VoidX (.vxs)");
-    for p in files.into_iter().take(12) {
+    let mut shown: Vec<std::path::PathBuf> = Vec::new();
+    for p in files {
         let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("proyecto").to_string();
         let loc = p.parent().and_then(|p| p.to_str()).unwrap_or("").to_string();
-        if !query.is_empty() && !file_matches(&name, &loc, query) { continue; }
-        let row = FileRow {
-            mark: Some((Icon::Assets, Color32::from_rgb(0x0C,0xCE,0x87))),
-            name: &name,
-            ink: t.text,
-            detail: &loc,
-            detail_size: 11.0,
-            detail_ink: t.text_secondary,
-        };
-        if listed(ui, t, ui.scope_id().with(("vxs_recent", &loc, &name)), 36.0, &row) {
-            match crate::project::load(&p) {
-                Ok(project) => {
-                    app.ui.project = Some(project);
-                    app.ui.home = true;
-                    app.ui.project_workspace = None;
-                    app.ui.world_pan = egui::Vec2::ZERO;
-                    app.ui.world_zoom = 1.0;
-                }
-                Err(e) => app.toast(format!("No se pudo abrir .vxs: {e}")),
-            }
+        if query.is_empty() || file_matches(&name, &loc, query) {
+            shown.push(p);
         }
+        if shown.len() >= 12 { break; }
     }
+    if shown.is_empty() { return; }
+    subheading(ui, t, "Proyectos VoidX (.vxs)");
+
+    let w = ui.available_width().max(260.0);
+    let (cols, card_w) = crate::home_recents::grid_columns(w);
+    let (picture_h, card_h) = crate::home_recents::card_heights(card_w);
+    ui.spacing_mut().item_spacing = vec2(GAP, GAP);
+    let mut row = 0usize;
+    let mut col = 0usize;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(GAP, GAP);
+        for p in shown {
+            let name = p.file_stem().and_then(|s| s.to_str()).unwrap_or("proyecto").to_string();
+            let (rect, resp) = ui.allocate_exact_size(vec2(card_w, card_h), Sense::click());
+            card_frame(ui, t, rect, &resp);
+            let picture = Rect::from_min_size(rect.min, vec2(card_w, picture_h));
+            ui.painter().rect_filled(picture, CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 }, Color32::from_rgb(0x14, 0x1C, 0x1D));
+            // miniature world blocks
+            let loaded = crate::project::load(&p).ok();
+            if let Some(proj) = &loaded {
+                draw_vxs_thumbnail(ui.painter(), picture.shrink(10.0), proj);
+            } else {
+                icons::paint(ui.painter(), Rect::from_center_size(picture.center(), vec2(48.0, 48.0)), Icon::Assets, Color32::from_rgb(0x0C,0xCE,0x87));
+            }
+            let footer = Rect::from_min_max(pos2(rect.min.x, picture.max.y), rect.max);
+            let icon_rect = Rect::from_min_size(pos2(footer.min.x + 12.0, footer.min.y + 10.0), vec2(20.0, 20.0));
+            icons::paint(ui.painter(), icon_rect, Icon::Assets, Color32::from_rgb(0x0C,0xCE,0x87));
+            ui.painter().text(pos2(icon_rect.max.x + 8.0, footer.min.y + 18.0), Align2::LEFT_CENTER, &name, semibold(12.5), t.text);
+            let detail = if let Some(proj) = &loaded {
+                format!("{} · {} archivos .kt", proj.package_name, proj.files.len())
+            } else {
+                p.parent().and_then(|p| p.to_str()).unwrap_or("").to_string()
+            };
+            ui.painter().text(pos2(icon_rect.max.x + 8.0, footer.min.y + 36.0), Align2::LEFT_CENTER, detail, regular(11.0), t.text_secondary);
+
+            if resp.clicked() {
+                match crate::project::load(&p) {
+                    Ok(project) => {
+                        app.ui.project = Some(project);
+                        app.ui.home = true;
+                        app.ui.project_workspace = None;
+                        app.ui.world_pan = egui::Vec2::ZERO;
+                        app.ui.world_zoom = 1.0;
+                    }
+                    Err(e) => app.toast(format!("No se pudo abrir .vxs: {e}")),
+                }
+            }
+            col += 1;
+            if col >= cols { col = 0; row += 1; }
+        }
+    });
     ui.add_space(8.0);
+}
+
+fn draw_vxs_thumbnail(painter: &egui::Painter, rect: Rect, project: &crate::project::VoidXProject) {
+    if project.files.is_empty() {
+        painter.text(rect.center(), Align2::CENTER_CENTER, "Vacío", regular(11.0), Color32::from_rgba_unmultiplied(255,255,255,120));
+        return;
+    }
+    let mut min_x = f32::INFINITY; let mut min_y = f32::INFINITY; let mut max_x = f32::NEG_INFINITY; let mut max_y = f32::NEG_INFINITY;
+    for f in &project.files {
+        min_x = min_x.min(f.x - 180.0); min_y = min_y.min(f.y - 55.0);
+        max_x = max_x.max(f.x + 180.0); max_y = max_y.max(f.y + 55.0);
+    }
+    let bw = (max_x - min_x).max(1.0); let bh = (max_y - min_y).max(1.0);
+    let scale = (rect.width() / bw).min(rect.height() / bh).min(0.25);
+    let ox = rect.center().x - (min_x + bw / 2.0) * scale;
+    let oy = rect.center().y - (min_y + bh / 2.0) * scale;
+    for f in &project.files {
+        let c = pos2(ox + f.x * scale, oy + f.y * scale);
+        let r = Rect::from_center_size(c, vec2(360.0 * scale, 110.0 * scale));
+        let st = f.kind.style();
+        painter.rect_filled(r, CornerRadius::same(2), c32(st.fill));
+        painter.rect_stroke(r, CornerRadius::same(2), Stroke::new(1.0, c32(st.stroke)), StrokeKind::Inside);
+    }
 }
 pub(crate) fn save_project(app: &mut FigApp) {
     capture_active_group_figcraft(app);

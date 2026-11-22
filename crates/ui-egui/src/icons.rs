@@ -116,6 +116,10 @@ icons! {
     Styles,
     Menu,
     Play,
+    /// UI container: monitor outline (Lucide monitor).
+    Monitor,
+    /// Data container: database outline (Lucide database).
+    Database,
     Home,
     Bell,
     Panels,

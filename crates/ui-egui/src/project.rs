@@ -97,9 +97,9 @@ impl FileGroupKind {
     pub fn icon(self) -> crate::icons::Icon {
         match self {
             FileGroupKind::Main => crate::icons::Icon::Play,
-            FileGroupKind::Ui => crate::icons::Icon::Frame,
+            FileGroupKind::Ui => crate::icons::Icon::Monitor,
             FileGroupKind::Engine => crate::icons::Icon::Code,
-            FileGroupKind::Data => crate::icons::Icon::Layers,
+            FileGroupKind::Data => crate::icons::Icon::Database,
             FileGroupKind::Network => crate::icons::Icon::Online,
         }
     }

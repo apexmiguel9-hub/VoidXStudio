@@ -656,6 +656,21 @@ fn draw(p: &P, icon: Icon) {
             }
         }
         Play => p.fill(&[(4.5, 2.5), (13.5, 8.0), (4.5, 13.5)]),
+        Monitor => {
+            // 16x16 monitor: screen + stand
+            p.rect(2.0, 2.5, 14.0, 11.0, 1.5);
+            p.line(5.5, 14.0, 10.5, 14.0);
+            p.line(8.0, 11.0, 8.0, 14.0);
+        }
+        Database => {
+            // 16x16 database: top ellipse, sides, bottom/middle arcs
+            p.path(&arc_pts(8.0, 4.0, 5.5, 0.0, PI).collect::<Vec<_>>(), false);
+            p.path(&arc_pts(8.0, 4.0, 5.5, PI, TAU).collect::<Vec<_>>(), false);
+            p.line(2.5, 4.0, 2.5, 12.0);
+            p.line(13.5, 4.0, 13.5, 12.0);
+            p.path(&arc_pts(8.0, 12.0, 5.5, 0.0, PI).collect::<Vec<_>>(), false);
+            p.path(&arc_pts(8.0, 8.0, 5.5, 0.0, PI).collect::<Vec<_>>(), false);
+        }
         Home => {
             // Unhinted so the roof's peak stays centred; the floor stops at the door.
             p.path(&[(6.5, 13.5), (3.5, 13.5), (3.5, 7.0), (8.0, 2.8), (12.5, 7.0), (12.5, 13.5), (9.5, 13.5)], false);
