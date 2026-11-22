@@ -35,7 +35,8 @@ pub struct NodeEditorActions {
 pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut LogicGraph, st: &mut NodeEditorState) -> NodeEditorActions {
     let actions = NodeEditorActions::default();
     let rect = ui.max_rect();
-    let resp = ui.interact(rect, ui.scope_id().with("node_editor_canvas"), Sense::click_and_drag());
+    let modal_open = st.add_open || st.connect_panel.is_some();
+    let resp = ui.interact(rect, ui.scope_id().with("node_editor_canvas"), if modal_open { Sense::hover() } else { Sense::click_and_drag() });
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, if ui.visuals().dark_mode { Color32::from_rgb(0x18,0x18,0x18) } else { Color32::from_rgb(0xFA,0xFA,0xFA) });
 
@@ -44,31 +45,33 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
     let pointer_in = resp.hover_pos().unwrap_or(rect.center());
     let scroll = ui.input(|i| i.smooth_scroll_delta);
     let pinch = ui.input(|i| i.zoom_delta());
-    if let Some(mt) = ui.input(|i| i.multi_touch()) {
-        if (mt.zoom_delta - 1.0).abs() > 0.001 {
-            let old = zoom;
-            zoom = (zoom * mt.zoom_delta).clamp(0.25, 3.0);
-            let before = (mt.start_pos - rect.min - pan) / old;
-            pan = mt.start_pos - rect.min - before * zoom;
-        }
-        pan += mt.translation_delta;
-    } else if resp.dragged() && st.dragging_node.is_none() {
-        pan += resp.drag_delta();
-    } else if resp.hovered() {
-        if (pinch - 1.0).abs() > 0.001 {
-            let old = zoom;
-            zoom = (zoom * pinch).clamp(0.25, 3.0);
-            let before = (pointer_in - rect.min - pan) / old;
-            pan = pointer_in - rect.min - before * zoom;
-        } else if scroll != egui::Vec2::ZERO {
-            if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+    if !modal_open {
+        if let Some(mt) = ui.input(|i| i.multi_touch()) {
+            if (mt.zoom_delta - 1.0).abs() > 0.001 {
                 let old = zoom;
-                let factor = (scroll.y / 200.0).exp();
-                zoom = (zoom * factor).clamp(0.25, 3.0);
+                zoom = (zoom * mt.zoom_delta).clamp(0.25, 3.0);
+                let before = (mt.start_pos - rect.min - pan) / old;
+                pan = mt.start_pos - rect.min - before * zoom;
+            }
+            pan += mt.translation_delta;
+        } else if resp.dragged() && st.dragging_node.is_none() {
+            pan += resp.drag_delta();
+        } else if resp.hovered() {
+            if (pinch - 1.0).abs() > 0.001 {
+                let old = zoom;
+                zoom = (zoom * pinch).clamp(0.25, 3.0);
                 let before = (pointer_in - rect.min - pan) / old;
                 pan = pointer_in - rect.min - before * zoom;
-            } else {
-                pan += scroll;
+            } else if scroll != egui::Vec2::ZERO {
+                if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                    let old = zoom;
+                    let factor = (scroll.y / 200.0).exp();
+                    zoom = (zoom * factor).clamp(0.25, 3.0);
+                    let before = (pointer_in - rect.min - pan) / old;
+                    pan = pointer_in - rect.min - before * zoom;
+                } else {
+                    pan += scroll;
+                }
             }
         }
     }
@@ -355,45 +358,56 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
         let create_r = Rect::from_min_size(pos2(panel.min.x + 14.0, panel.max.y - 54.0), vec2(panel.width()-28.0, 40.0));
         let list_rect = Rect::from_min_max(pos2(panel.min.x + 14.0, list_top), pos2(panel.max.x - 14.0, create_r.min.y - 10.0));
         painter.rect_filled(list_rect, CornerRadius::same(8), Color32::from_rgb(34,34,39));
-        let mut y = list_rect.min.y + 6.0;
-        let mut last_cat: Option<crate::logic::MainCategory> = None;
-        for kind in filtered.iter().take(12) {
-            if let Some(cat) = kind.category() {
-                if last_cat != Some(cat) {
-                    painter.text(pos2(list_rect.min.x + 10.0, y + 8.0), Align2::LEFT_CENTER, cat.label(), semibold(10.5), with_alpha(accent, 220));
-                    y += 20.0;
-                    last_cat = Some(cat);
-                }
-            }
-            let row = Rect::from_min_size(pos2(list_rect.min.x + 6.0, y), vec2(list_rect.width()-12.0, 44.0));
-            let rr = ui.interact(row, ui.scope_id().with(("add_modal_kind", kind.label())), Sense::click());
-            let selected = st.add_selected == Some(*kind);
-            painter.rect_filled(row, CornerRadius::same(8), if selected { with_alpha(accent, 55) } else if rr.hovered() { Color32::from_rgb(48,48,55) } else { Color32::TRANSPARENT });
-            if selected { painter.rect_stroke(row, CornerRadius::same(8), Stroke::new(1.0, accent), StrokeKind::Inside); }
-            painter.text(pos2(row.min.x + 10.0, row.min.y + 14.0), Align2::LEFT_CENTER, kind.label(), semibold(12.5), Color32::WHITE);
-            painter.text(pos2(row.min.x + 10.0, row.min.y + 30.0), Align2::LEFT_CENTER, kind.description(), regular(10.0), Color32::from_gray(185));
-            if rr.clicked() { st.add_selected = Some(*kind); }
-            y += 48.0;
-            if y > list_rect.max.y - 44.0 { break; }
-        }
-        if filtered.is_empty() {
-            painter.text(list_rect.center(), Align2::CENTER_CENTER, "Sin resultados", regular(12.0), Color32::from_gray(170));
-        }
+
+        let mut create_clicked_kind: Option<NodeKind> = None;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect.shrink2(vec2(6.0, 6.0))), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("add_node_scroll")
+                .auto_shrink([false, false])
+                .max_height((list_rect.height() - 12.0).max(120.0))
+                .show(ui, |ui| {
+                    if filtered.is_empty() {
+                        ui.add_space(24.0);
+                        ui.label(egui::RichText::new("Sin resultados").color(Color32::from_gray(170)));
+                    } else {
+                        let mut last_cat: Option<crate::logic::MainCategory> = None;
+                        for kind in filtered.iter().copied() {
+                            if let Some(cat) = kind.category() {
+                                if last_cat != Some(cat) {
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new(cat.label()).font(semibold(11.0)).color(with_alpha(accent, 220)));
+                                    last_cat = Some(cat);
+                                }
+                            }
+                            let selected = st.add_selected == Some(kind);
+                            let (row_rect, row_resp) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::click());
+                            let rp = ui.painter_at(row_rect);
+                            rp.rect_filled(row_rect, CornerRadius::same(8), if selected { with_alpha(accent, 55) } else if row_resp.hovered() { Color32::from_rgb(48,48,55) } else { Color32::TRANSPARENT });
+                            if selected { rp.rect_stroke(row_rect, CornerRadius::same(8), Stroke::new(1.0, accent), StrokeKind::Inside); }
+                            rp.text(pos2(row_rect.min.x + 10.0, row_rect.min.y + 15.0), Align2::LEFT_CENTER, kind.label(), semibold(12.5), Color32::WHITE);
+                            rp.text(pos2(row_rect.min.x + 10.0, row_rect.min.y + 33.0), Align2::LEFT_CENTER, kind.description(), regular(10.0), Color32::from_gray(185));
+                            if row_resp.clicked() { st.add_selected = Some(kind); }
+                            ui.add_space(2.0);
+                        }
+                    }
+                });
+        });
 
         let can_create = st.add_selected.is_some();
         let create_resp = ui.interact(create_r, ui.scope_id().with("add_modal_create"), Sense::click());
         painter.rect_filled(create_r, CornerRadius::same(8), if can_create { if create_resp.hovered() { with_alpha(accent, 220) } else { accent } } else { Color32::from_rgb(70,70,76) });
-        painter.text(create_r.center(), Align2::CENTER_CENTER, "Create", semibold(13.0), if can_create { Color32::BLACK } else { Color32::from_gray(170) });
+        painter.text(create_r.center(), Align2::CENTER_CENTER, "Create", semibold(13.0), Color32::WHITE);
         if create_resp.clicked() {
-            if let Some(kind) = st.add_selected {
-                let id = graph.next_id();
-                let world = (rect.center() - rect.min - pan) / zoom;
-                graph.nodes.push(LogicNode { id, kind, x: world.x, y: world.y, props: default_props(kind) });
-                st.selected_node = Some(id);
-                st.add_open = false;
-                st.add_query.clear();
-                st.add_selected = None;
-            }
+            create_clicked_kind = st.add_selected;
+        }
+        if let Some(kind) = create_clicked_kind {
+            let id = graph.next_id();
+            let world = (rect.center() - rect.min - pan) / zoom;
+            graph.nodes.push(LogicNode { id, kind, x: world.x, y: world.y, props: default_props(kind) });
+            st.selected_node = Some(id);
+            st.add_open = false;
+            st.add_query.clear();
+            st.add_selected = None;
         }
 
         if close_resp.clicked() || (overlay_resp.clicked() && !panel_resp.clicked() && te_resp.as_ref().is_none_or(|r| !r.clicked())) {
