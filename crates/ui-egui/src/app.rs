@@ -287,8 +287,6 @@ impl FigApp {
         }
         if !self.has_files() || self.ui.home {
             home::show(self, ui);
-            // The shortcuts panel belongs to the canvas; it doesn't hang over the home screen
-            // (cleared after the home widgets, which may have just asked for it).
             self.ui.shortcuts_panel = false;
             dialogs::keys(self, &ctx);
             dialogs::show(self, &ctx);
@@ -298,6 +296,19 @@ impl FigApp {
             shortcuts::clear_field_save_marker(&ctx);
             self.observe_ime(&ctx, false);
             return;
+        }
+        if let Some(kind) = home::active_workspace_kind(self) {
+            if kind != crate::project::FileGroupKind::Ui {
+                home::show_project_workspace(self, ui);
+                dialogs::keys(self, &ctx);
+                dialogs::show(self, &ctx);
+                updates_ui::show(self, &ctx);
+                self.toast_ui(&ctx);
+                windows::requests(self, &ctx);
+                shortcuts::clear_field_save_marker(&ctx);
+                self.observe_ime(&ctx, false);
+                return;
+            }
         }
         let hidden = self.session.ds().map(|d| d.view.ui_hidden).unwrap_or(false);
         // Minimized (Shift+Cmd/Ctrl+\, the Minimize button by the file name): "collapses the
@@ -391,6 +402,20 @@ impl FigApp {
                     a11y::container(ui, egui::accesskit::Role::Toolbar, i18n::tr("Tools"));
                     toolbar::show(self, ui);
                 });
+            }
+            if home::active_workspace_kind(self) == Some(crate::project::FileGroupKind::Ui) {
+                let rect = ui.max_rect();
+                let bar = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width().min(420.0), 40.0)).translate(egui::vec2(12.0, 12.0));
+                let resp = ui.interact(bar, ui.scope_id().with("ui_ws_back_overlay"), egui::Sense::click());
+                let p = ui.painter_at(bar);
+                p.rect_filled(bar, egui::CornerRadius::same(8), if resp.hovered() { egui::Color32::from_rgb(0x1F,0xA8,0x6A) } else { egui::Color32::from_rgb(0x0C,0xCE,0x87) });
+                let label = self.ui.project.as_ref().and_then(|pr| self.ui.project_workspace.and_then(|i| pr.files.get(i))).map(|g| format!("Guardar y volver — {}.kt", g.name)).unwrap_or_else(|| "Guardar y volver al World Space".to_string());
+                p.text(bar.center(), egui::Align2::CENTER_CENTER, label, theme::regular(12.5), egui::Color32::BLACK);
+                if resp.clicked() {
+                    home::save_project(self);
+                    self.ui.project_workspace = None;
+                    self.ui.home = true;
+                }
             }
         });
         if narrow {

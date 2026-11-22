@@ -479,8 +479,18 @@ pub struct UiState {
     pub home_view: home::Home,
     /// The Create Project draft the dialog edits, when open.
     pub project_dialog: Option<crate::project::ProjectDraft>,
+    /// The Add Container draft in World Space, when open.
+    pub add_group_dialog: Option<crate::project::AddGroupDraft>,
     /// The project whose world is on screen (the World Space), when one is open.
     pub project: Option<crate::project::VoidXProject>,
+    /// World Space camera pan (screen points).
+    pub world_pan: egui::Vec2,
+    /// World Space camera zoom.
+    pub world_zoom: f32,
+    /// Index of group being dragged in World Space.
+    pub world_drag: Option<usize>,
+    /// Open project workspace: group index being edited.
+    pub project_workspace: Option<usize>,
     /// How the window's title bar is drawn (the desktop app sets it when it opens the window).
     pub title_bar: TitleBar,
     /// Every icon on one screen, for reviewing the set (control channel `ui.set {iconGallery}`).
@@ -689,7 +699,12 @@ impl Default for UiState {
             home: true,
             home_view: home::Home::default(),
             project_dialog: None,
+            add_group_dialog: None,
             project: None,
+            world_pan: egui::Vec2::ZERO,
+            world_zoom: 1.0,
+            world_drag: None,
+            project_workspace: None,
             title_bar: TitleBar::Native,
             icon_gallery: false,
             toast: None,

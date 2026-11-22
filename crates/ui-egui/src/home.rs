@@ -143,9 +143,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     dropped(app, ui.ctx());
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.panel)).show(ui, |ui| {
-        if let Some(project) = app.ui.project.clone() {
-            // The World Space: the project's groups as blocks in a world.
-            world_space(app, ui, &t, &project);
+        if app.ui.project.is_some() {
+            project_view(app, ui, &t);
             return;
         }
         let rect = ui.max_rect();
@@ -153,7 +152,6 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
         ui.painter().line_segment([left.right_top(), left.right_bottom()], Stroke::new(1.0, t.border));
         sidebar(app, ui, &t, left);
         if app.ui.home_view.file_query.trim().is_empty() && app.ui.home_view.section == Section::Online {
-            // Your online files lay themselves out in the area (and scroll their own list).
             let area = Rect::from_min_max(pos2(left.max.x + 40.0, rect.min.y + 24.0), rect.max - vec2(40.0, 24.0));
             crate::online::section(app, ui, area, &t);
             opened_join(app);
@@ -180,105 +178,437 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
     if app.ui.project_dialog.is_some() {
         create_project_dialog(app, ui);
     }
-    // The whole window is the drop target, not only the canvas.
+    if app.ui.add_group_dialog.is_some() {
+        add_group_dialog(app, ui);
+    }
     crate::drop_overlay(ui.ctx(), ui.ctx().content_rect(), tr("Drop to open"));
 }
 
-/// The Create Project dialog: target language, app name, package name and optional icon; creates
-/// the project (saving it) and opens its world.
+/// The Create Project dialog.
 fn create_project_dialog(app: &mut FigApp, ui: &mut Ui) {
-    let mut draft = match app.ui.project_dialog.take() {
-        Some(d) => d,
-        None => return,
-    };
+    let Some(mut draft) = app.ui.project_dialog.take() else { return };
     let mut open = true;
-    let ctx = ui.ctx();
+    let mut close_dialog = false;
+    let ctx = ui.ctx().clone();
     crate::dialogs::window("Create Project", &ctx)
-        .id(Id::new("create_project_dialog"))
+        .id(egui::Id::unique("create_project_dialog"))
         .order(Order::Foreground)
         .open(&mut open)
         .show(&ctx, |ui| {
             let t = Tokens::get(ui.ctx());
-            ui.set_width(crate::dialogs::dialog_width(ui.ctx(), 420.0));
-            ui.label(egui::RichText::new("Language").font(semibold(12.0)).color(t.text_secondary));
+            ui.set_width(crate::dialogs::dialog_width(ui.ctx(), 440.0));
+            ui.spacing_mut().item_spacing.y = 8.0;
+
+            ui.label(egui::RichText::new("Lenguaje").font(semibold(12.0)).color(t.text_secondary));
             ui.horizontal_wrapped(|ui| {
-                let langs = [
-                    ("Kotlin", crate::project::ProjectLanguage::Kotlin),
-                    ("Flutter", crate::project::ProjectLanguage::Flutter),
-                    ("Dart", crate::project::ProjectLanguage::Dart),
-                    ("Slint", crate::project::ProjectLanguage::Slint),
-                ];
-                for (label, lang) in langs {
-                    if ui.button(label).clicked() {
+                for lang in crate::project::ProjectLanguage::ALL {
+                    let selected = draft.language == lang;
+                    let available = lang.available();
+                    let (fill, stroke, text_col) = if selected {
+                        (Color32::from_rgb(0x19, 0x3D, 0x23), Color32::from_rgb(0x0C, 0xCE, 0x87), Color32::from_rgb(0x31, 0xEC, 0x8E))
+                    } else if !available {
+                        (t.field, t.border, t.text_tertiary)
+                    } else {
+                        (t.field, t.border, t.text)
+                    };
+                    let btn = egui::Button::new(egui::RichText::new(lang.label()).size(12.0).color(text_col))
+                        .fill(fill)
+                        .stroke(Stroke::new(if selected { 1.5 } else { 1.0 }, stroke))
+                        .corner_radius(CornerRadius::same(6));
+                    let resp = ui.add_enabled(available, btn);
+                    if resp.clicked() && available {
                         draft.language = lang;
                     }
                 }
             });
-            ui.add_space(6.0);
-            ui.add(egui::TextEdit::singleline(&mut draft.name).desired_width(280.0));
-            ui.add_space(6.0);
-            ui.add(egui::TextEdit::singleline(&mut draft.package_name).desired_width(280.0));
-            ui.add_space(6.0);
-            ui.add(egui::TextEdit::singleline(&mut draft.icon).desired_width(280.0));
-            ui.add_space(10.0);
-            let can_create = !draft.name.trim().is_empty()
-                && crate::project::VoidXProject::package_name_ok(&draft.package_name);
-            if widgets::button(ui, "Create", true, can_create).clicked() {
-                let name = if draft.name.trim().is_empty() {
-                    "My App".to_string()
-                } else {
-                    draft.name.trim().to_string()
-                };
-                let project = crate::project::VoidXProject {
-                    name: name.clone(),
-                    package_name: draft.package_name.trim().to_string(),
-                    language: draft.language,
-                    icon: (!draft.icon.is_empty()).then_some(draft.icon.clone()),
-                    world: crate::project::World::default(),
-                    files: vec![crate::project::FileGroup {
-                        name: "Main".to_string(),
-                        kind: crate::project::FileGroupKind::Ui,
-                        visual: Some("untitled.figcraft".to_string()),
-                        logic: None,
-                    }],
-                };
-                let dir = app.services.documents_dir();
-                let _ = std::fs::create_dir_all(&dir);
-                let _ = crate::project::save(
-                    &dir.join(format!("{}.vxs", name)),
-                    &project,
-                );
-                app.ui.project = Some(project);
-                app.ui.project_dialog = None;
+
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("App Name").font(semibold(12.0)).color(t.text_secondary));
+            ui.add(egui::TextEdit::singleline(&mut draft.name).hint_text("MiApp").desired_width(f32::INFINITY));
+
+            ui.label(egui::RichText::new("Package Name").font(semibold(12.0)).color(t.text_secondary));
+            ui.add(egui::TextEdit::singleline(&mut draft.package_name).hint_text("com.voidx.miapp").desired_width(f32::INFINITY));
+            let pkg_ok = crate::project::VoidXProject::package_name_ok(&draft.package_name);
+            if !draft.package_name.is_empty() && !pkg_ok {
+                ui.label(egui::RichText::new("Debe tener al menos 2 segmentos, ej. com.voidx.miapp").size(11.0).color(t.warning));
             }
-            if widgets::button(ui, "Cancel", false, true).clicked() {
-                app.ui.project_dialog = None;
-            }
+
+            ui.label(egui::RichText::new("Icon Path (opcional)").font(semibold(12.0)).color(t.text_secondary));
+            ui.add(egui::TextEdit::singleline(&mut draft.icon).hint_text("/ruta/icon.png").desired_width(f32::INFINITY));
+
+            ui.add_space(8.0);
+            let can_create = !draft.name.trim().is_empty() && pkg_ok;
+            ui.horizontal(|ui| {
+                let create = egui::Button::new(egui::RichText::new("Create").color(if can_create { Color32::BLACK } else { t.text_tertiary }).strong())
+                    .fill(if can_create { Color32::from_rgb(0x0C, 0xCE, 0x87) } else { t.field })
+                    .corner_radius(CornerRadius::same(6));
+                if ui.add_enabled(can_create, create).clicked() {
+                    let name = draft.name.trim().to_string();
+                    let project = crate::project::VoidXProject {
+                        name: name.clone(),
+                        package_name: draft.package_name.trim().to_string(),
+                        language: draft.language,
+                        icon: (!draft.icon.trim().is_empty()).then_some(draft.icon.trim().to_string()),
+                        world: crate::project::World::default(),
+                        files: Vec::new(),
+                    };
+                    let dir = app.services.documents_dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    let path = dir.join(format!("{}.vxs", crate::project::VoidXProject::sanitize_name(&name)));
+                    match crate::project::save(&path, &project) {
+                        Ok(()) => {
+                            app.ui.project = Some(project);
+                            app.ui.world_pan = egui::Vec2::ZERO;
+                            app.ui.world_zoom = 1.0;
+                            app.ui.project_workspace = None;
+                            close_dialog = true;
+                        }
+                        Err(e) => app.toast(format!("No se pudo guardar .vxs: {e}")),
+                    }
+                }
+                if ui.button("Cancel").clicked() {
+                    close_dialog = true;
+                }
+            });
         });
-    if !open {
-        // Click outside / Escape closed the window: forget the draft.
-        app.ui.project_dialog = None;
-    } else {
-        // The dialog is still open: keep the draft with whatever the user typed.
+    if open && !close_dialog {
         app.ui.project_dialog = Some(draft);
     }
 }
 
-/// The World Space: the open project's groups as blocks, each with an Edit to its workspace.
-fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens, project: &crate::project::VoidXProject) {
-    ui.label(egui::RichText::new("World Space").font(semibold(18.0)).color(t.text));
-    ui.add_space(12.0);
-    for group in &project.files {
-        let (rect, resp) = ui.allocate_exact_size(vec2(240.0, 72.0), Sense::click());
-        crate::home::card_frame(ui, t, rect, &resp);
-        ui.painter().text(pos2(rect.min.x + 12.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &group.name, semibold(12.0), t.text);
-        ui.painter().text(pos2(rect.max.x - 12.0, rect.center().y - 8.0), Align2::RIGHT_CENTER, group.kind.label(), regular(11.0), t.text_secondary);
-        if resp.clicked() {
-            if group.kind == crate::project::FileGroupKind::Ui {
-                app.run("file.new", json!({}));
-                app.ui.home = false;
+fn c32(rgb: [u8; 3]) -> Color32 { Color32::from_rgb(rgb[0], rgb[1], rgb[2]) }
+
+pub(crate) fn project_view(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+    let Some(ws_idx) = app.ui.project_workspace else {
+        world_space(app, ui, t);
+        return;
+    };
+    group_workspace(app, ui, t, ws_idx);
+}
+
+fn world_space(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
+    let rect = ui.max_rect();
+    let resp = ui.interact(rect, ui.scope_id().with("world_space_canvas"), Sense::click_and_drag());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, if ui.visuals().dark_mode { Color32::from_rgb(0x16, 0x16, 0x16) } else { Color32::from_rgb(0xF3, 0xF3, 0xF3) });
+
+    let mut pan = app.ui.world_pan;
+    let mut zoom = app.ui.world_zoom.clamp(0.25, 4.0);
+    let pointer_in = resp.hover_pos().unwrap_or(rect.center());
+    let scroll = ui.input(|i| i.smooth_scroll_delta);
+    let pinch = ui.input(|i| i.zoom_delta());
+    if let Some(mt) = ui.input(|i| i.multi_touch()) {
+        if (mt.zoom_delta - 1.0).abs() > 0.001 {
+            let old = zoom;
+            zoom = (zoom * mt.zoom_delta).clamp(0.25, 4.0);
+            let world_before = (mt.start_pos - rect.min - pan) / old;
+            pan = mt.start_pos - rect.min - world_before * zoom;
+        }
+        pan += mt.translation_delta;
+    } else if resp.dragged() && app.ui.world_drag.is_none() {
+        pan += resp.drag_delta();
+    } else if resp.hovered() {
+        if (pinch - 1.0).abs() > 0.001 {
+            let old = zoom;
+            zoom = (zoom * pinch).clamp(0.25, 4.0);
+            let world_before = (pointer_in - rect.min - pan) / old;
+            pan = pointer_in - rect.min - world_before * zoom;
+        } else if scroll != egui::Vec2::ZERO {
+            if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                let old = zoom;
+                let factor = (scroll.y / 200.0).exp();
+                zoom = (zoom * factor).clamp(0.25, 4.0);
+                let world_before = (pointer_in - rect.min - pan) / old;
+                pan = pointer_in - rect.min - world_before * zoom;
+            } else {
+                pan += scroll;
             }
         }
+    }
+    app.ui.world_pan = pan;
+    app.ui.world_zoom = zoom;
+
+    let grid_step = 48.0 * zoom;
+    if grid_step >= 16.0 {
+        let grid_col = if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(255,255,255,18) } else { Color32::from_rgba_unmultiplied(0,0,0,18) };
+        let ox = (pan.x % grid_step + grid_step) % grid_step;
+        let oy = (pan.y % grid_step + grid_step) % grid_step;
+        let mut x = rect.min.x + ox;
+        while x < rect.max.x { painter.line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, grid_col)); x += grid_step; }
+        let mut y = rect.min.y + oy;
+        while y < rect.max.y { painter.line_segment([pos2(rect.min.x, y), pos2(rect.max.x, y)], Stroke::new(1.0, grid_col)); y += grid_step; }
+    }
+
+    let title = app.ui.project.as_ref().map(|p| p.name.clone()).unwrap_or_else(|| "Project".to_string());
+    painter.text(pos2(rect.min.x + 20.0, rect.min.y + 24.0), Align2::LEFT_CENTER, format!("World Space — {title}"), semibold(18.0), t.text);
+    let back_rect = Rect::from_min_size(pos2(rect.min.x + 20.0, rect.min.y + 44.0), vec2(120.0, 30.0));
+    let back_resp = ui.interact(back_rect, ui.scope_id().with("ws_back_home"), Sense::click());
+    painter.rect_filled(back_rect, CornerRadius::same(6), if back_resp.hovered() { t.hover } else { t.field });
+    painter.rect_stroke(back_rect, CornerRadius::same(6), Stroke::new(1.0, t.border), StrokeKind::Inside);
+    painter.text(back_rect.center(), Align2::CENTER_CENTER, "← Home", regular(12.0), t.text);
+    if back_resp.clicked() {
+        save_project(app);
+        app.ui.project = None;
+        app.ui.project_workspace = None;
+        app.ui.add_group_dialog = None;
+        return;
+    }
+
+    let card_w = 360.0 * zoom;
+    let card_h = 110.0 * zoom;
+    let mut open_ws: Option<usize> = None;
+    let mut drag_idx = app.ui.world_drag;
+    if !ui.input(|i| i.pointer.any_down()) { drag_idx = None; }
+
+    let group_count = app.ui.project.as_ref().map(|p| p.files.len()).unwrap_or(0);
+    for i in 0..group_count {
+        let Some(project) = app.ui.project.as_ref() else { break };
+        let g = project.files[i].clone();
+        let center = pos2(rect.min.x + pan.x + g.x * zoom, rect.min.y + pan.y + g.y * zoom);
+        let card_rect = Rect::from_center_size(center, vec2(card_w, card_h));
+        let id = ui.scope_id().with(("ws_card", i, &g.name));
+        let card_resp = ui.interact(card_rect, id, Sense::click_and_drag());
+        if card_resp.drag_started() && !g.kind.anchored() { app.ui.world_drag = Some(i); drag_idx = Some(i); }
+        if drag_idx == Some(i) && card_resp.dragged() && !g.kind.anchored() {
+            let delta = card_resp.drag_delta() / zoom;
+            if let Some(p) = app.ui.project.as_mut() { if let Some(gg) = p.files.get_mut(i) { gg.x += delta.x; gg.y += delta.y; } }
+        }
+
+        let style = g.kind.style();
+        painter.rect_filled(card_rect, CornerRadius::same(10), c32(style.fill));
+        painter.rect_stroke(card_rect, CornerRadius::same(10), Stroke::new(if card_resp.hovered() { 2.0 } else { 1.5 }, c32(style.stroke)), StrokeKind::Inside);
+        let pad = 14.0 * zoom;
+        painter.text(pos2(card_rect.min.x + pad, card_rect.min.y + 28.0 * zoom), Align2::LEFT_CENTER, crate::project::VoidXProject::display_kt(&g.name), semibold((16.0 * zoom).max(10.0)), Color32::WHITE);
+        let badge_font = regular((12.0 * zoom).max(9.0));
+        let badge_g = painter.layout_no_wrap(style.badge.to_string(), badge_font.clone(), c32(style.badge_text));
+        let badge_rect = Rect::from_min_size(pos2(card_rect.min.x + pad, card_rect.min.y + 48.0 * zoom), vec2(badge_g.size().x + 20.0 * zoom, 24.0 * zoom));
+        painter.rect_filled(badge_rect, CornerRadius::same((badge_rect.height() / 2.0).round().clamp(0.0, 255.0) as u8), c32(style.badge_fill));
+        painter.text(badge_rect.center(), Align2::CENTER_CENTER, style.badge, badge_font, c32(style.badge_text));
+
+        let edit_font = regular((13.0 * zoom).max(9.0));
+        let eg = painter.layout_no_wrap("Editar >".to_string(), edit_font.clone(), c32(style.accent));
+        let er = Rect::from_min_size(pos2(card_rect.max.x - eg.size().x - 18.0*zoom, card_rect.max.y - 30.0*zoom), eg.size() + vec2(8.0*zoom, 6.0*zoom));
+        let edit_resp = ui.interact(er, ui.scope_id().with(("ws_edit", i)), Sense::click());
+        painter.text(er.left_top(), Align2::LEFT_TOP, "Editar >", edit_font, if edit_resp.hovered() { Color32::WHITE } else { c32(style.accent) });
+        if edit_resp.clicked() { open_ws = Some(i); }
+        if g.kind.anchored() {
+            painter.text(pos2(card_rect.max.x - pad, card_rect.min.y + 20.0*zoom), Align2::RIGHT_CENTER, "PIN", regular((10.0*zoom).max(8.0)), t.text_secondary);
+        }
+    }
+    app.ui.world_drag = drag_idx;
+    if let Some(idx) = open_ws { open_group_workspace(app, idx); }
+
+    let add_rect = Rect::from_min_size(pos2(rect.max.x - 144.0, rect.max.y - 68.0), vec2(120.0, 44.0));
+    let add_resp = ui.interact(add_rect, ui.scope_id().with("ws_add_btn"), Sense::click());
+    painter.rect_filled(add_rect, CornerRadius::same(10), if add_resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
+    painter.text(add_rect.center(), Align2::CENTER_CENTER, "+ Añadir", semibold(14.0), Color32::BLACK);
+    if add_resp.clicked() {
+        let default_kind = app.ui.project.as_ref().and_then(|p| crate::project::FileGroupKind::CREATE_ORDER.iter().copied().find(|k| p.can_add_kind(*k))).unwrap_or(crate::project::FileGroupKind::Ui);
+        app.ui.add_group_dialog = Some(crate::project::AddGroupDraft { kind: default_kind, name: crate::project::VoidXProject::default_group_name(default_kind) });
+    }
+}
+
+pub(crate) fn open_group_workspace(app: &mut FigApp, idx: usize) {
+    let Some(project) = app.ui.project.as_ref() else { return };
+    let Some(group) = project.files.get(idx).cloned() else { return };
+    let name = crate::project::VoidXProject::sanitize_name(&group.name);
+    let visual = group.visual.clone().unwrap_or_else(|| format!("{name}.figcraft"));
+    if let Some(p) = app.ui.project.as_mut() {
+        if let Some(g) = p.files.get_mut(idx) { g.visual = Some(visual.clone()); }
+    }
+
+    if group.kind.opens_figcraft() {
+        let mut loaded = false;
+        if let Some(bytes) = group.visual_data.as_ref() {
+            let dir = app.services.documents_dir().join(".vxs_tmp");
+            let _ = std::fs::create_dir_all(&dir);
+            let tmp = dir.join(&visual);
+            if std::fs::write(&tmp, bytes).is_ok() {
+                loaded = app.run("file.open", json!({"path": tmp.to_string_lossy()})).is_some();
+            }
+        }
+        if !loaded {
+            let _ = app.run("file.new", json!({"name": group.name.clone()}));
+        }
+        app.ui.home = false;
+    } else {
+        app.ui.home = true; // clean workspace rendered by home/project_view
+        app.ui.world_pan = egui::Vec2::ZERO;
+        app.ui.world_zoom = 1.0;
+    }
+    app.ui.project_workspace = Some(idx);
+}
+
+fn add_group_dialog(app: &mut FigApp, ui: &mut Ui) {
+    let Some(mut draft) = app.ui.add_group_dialog.take() else { return };
+    let mut open = true;
+    let mut close_dialog = false;
+    let ctx = ui.ctx().clone();
+    crate::dialogs::window("Añadir contenedor", &ctx)
+        .id(egui::Id::unique("add_group_dialog"))
+        .order(Order::Foreground)
+        .open(&mut open)
+        .show(&ctx, |ui| {
+            let t = Tokens::get(ui.ctx());
+            ui.set_width(crate::dialogs::dialog_width(ui.ctx(), 460.0));
+            ui.label(egui::RichText::new("Tipo de contenedor").font(semibold(12.0)).color(t.text_secondary));
+            ui.add_space(4.0);
+            for kind in crate::project::FileGroupKind::CREATE_ORDER {
+                let can_add = app.ui.project.as_ref().is_some_and(|p| p.can_add_kind(kind));
+                let selected = draft.kind == kind;
+                let style = kind.style();
+                let label = if kind.unique() && !can_add { format!("{} (máx 1)", kind.label()) } else { kind.label().to_string() };
+                let fill = if selected { c32(style.badge_fill) } else { t.field };
+                let text_col = if selected { c32(style.badge_text) } else if can_add { t.text } else { t.text_tertiary };
+                let btn = egui::Button::new(egui::RichText::new(format!("{label} — {}", kind.description())).size(12.0).color(text_col))
+                    .fill(fill).stroke(Stroke::new(1.0, c32(style.stroke))).corner_radius(CornerRadius::same(6));
+                let resp = ui.add_enabled(can_add, btn);
+                if resp.clicked() && can_add { draft.kind = kind; if draft.name.trim().is_empty() { draft.name = crate::project::VoidXProject::default_group_name(kind); } }
+            }
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Nombre del archivo").font(semibold(12.0)).color(t.text_secondary));
+            ui.add(egui::TextEdit::singleline(&mut draft.name).hint_text("main").desired_width(f32::INFINITY));
+            ui.label(egui::RichText::new(format!("Se mostrará como: {}", crate::project::VoidXProject::display_kt(&draft.name))).size(11.0).color(t.text_secondary));
+            ui.add_space(8.0);
+            let can_create = !draft.name.trim().is_empty() && app.ui.project.as_ref().is_some_and(|p| p.can_add_kind(draft.kind));
+            ui.horizontal(|ui| {
+                let create = egui::Button::new(egui::RichText::new("Crear").color(if can_create { Color32::BLACK } else { t.text_tertiary }).strong())
+                    .fill(if can_create { Color32::from_rgb(0x0C,0xCE,0x87) } else { t.field }).corner_radius(CornerRadius::same(6));
+                if ui.add_enabled(can_create, create).clicked() {
+                    if let Some(p) = app.ui.project.as_mut() {
+                        let idx = p.files.len();
+                        let x = 220.0 + (idx as f32) * 40.0;
+                        let y = 180.0 + (idx as f32) * 40.0;
+                        let name = crate::project::VoidXProject::sanitize_name(&draft.name);
+                        let visual = matches!(draft.kind, crate::project::FileGroupKind::Ui | crate::project::FileGroupKind::Main).then(|| format!("{name}.figcraft"));
+                        p.files.push(crate::project::FileGroup { name, kind: draft.kind, visual, logic: None, x, y, visual_data: None });
+                    }
+                    save_project(app);
+                    close_dialog = true;
+                }
+                if ui.button("Cancel").clicked() { close_dialog = true; }
+            });
+        });
+    if open && !close_dialog { app.ui.add_group_dialog = Some(draft); }
+}
+
+pub(crate) fn group_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize) {
+    let Some(project) = app.ui.project.as_ref() else { app.ui.project_workspace = None; return; };
+    let Some(group) = project.files.get(idx).cloned() else { app.ui.project_workspace = None; return; };
+
+    if group.kind == crate::project::FileGroupKind::Ui {
+        // UI workspace uses normal FigCraft editor; draw a top overlay bar to return.
+        let rect = ui.max_rect();
+        let bar_h = 40.0;
+        let bar_rect = Rect::from_min_size(rect.min, vec2(rect.width(), bar_h));
+        let painter = ui.painter_at(bar_rect);
+        painter.rect_filled(bar_rect, 0.0, t.panel);
+        painter.rect_stroke(bar_rect, 0.0, Stroke::new(1.0, t.border), StrokeKind::Inside);
+        painter.text(pos2(bar_rect.min.x + 16.0, bar_rect.center().y), Align2::LEFT_CENTER, format!("UI: {}.kt", group.name), semibold(13.0), t.text);
+        let back = Rect::from_min_size(pos2(bar_rect.max.x - 220.0, bar_rect.min.y + 6.0), vec2(200.0, 28.0));
+        let resp = ui.interact(back, ui.scope_id().with("ui_ws_back"), Sense::click());
+        painter.rect_filled(back, CornerRadius::same(6), if resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
+        painter.text(back.center(), Align2::CENTER_CENTER, "Guardar y volver al World Space", regular(11.5), Color32::BLACK);
+        if resp.clicked() {
+            save_project(app);
+            app.ui.project_workspace = None;
+            app.ui.home = true;
+        }
+        // The actual editor is rendered by app frame; we only reserve no space here.
+        return;
+    }
+
+    // Clean canvas for Main/Engine/Data/Network
+    let rect = ui.max_rect();
+    let resp = ui.interact(rect, ui.scope_id().with(("clean_ws", idx)), Sense::click_and_drag());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 0.0, if ui.visuals().dark_mode { Color32::from_rgb(0x18,0x18,0x18) } else { Color32::from_rgb(0xFA,0xFA,0xFA) });
+    let mut pan = app.ui.world_pan;
+    let mut zoom = app.ui.world_zoom.clamp(0.25, 4.0);
+    let pointer_in = resp.hover_pos().unwrap_or(rect.center());
+    let scroll = ui.input(|i| i.smooth_scroll_delta);
+    let pinch = ui.input(|i| i.zoom_delta());
+    if let Some(mt) = ui.input(|i| i.multi_touch()) {
+        if (mt.zoom_delta - 1.0).abs() > 0.001 {
+            let old = zoom; zoom = (zoom * mt.zoom_delta).clamp(0.25, 4.0);
+            let before = (mt.start_pos - rect.min - pan) / old; pan = mt.start_pos - rect.min - before * zoom;
+        }
+        pan += mt.translation_delta;
+    } else if resp.dragged() {
+        pan += resp.drag_delta();
+    } else if resp.hovered() {
+        if (pinch - 1.0).abs() > 0.001 {
+            let old = zoom; zoom = (zoom * pinch).clamp(0.25, 4.0);
+            let before = (pointer_in - rect.min - pan) / old; pan = pointer_in - rect.min - before * zoom;
+        } else if scroll != egui::Vec2::ZERO {
+            if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                let old = zoom; let factor = (scroll.y / 200.0).exp(); zoom = (zoom * factor).clamp(0.25, 4.0);
+                let before = (pointer_in - rect.min - pan) / old; pan = pointer_in - rect.min - before * zoom;
+            } else { pan += scroll; }
+        }
+    }
+    app.ui.world_pan = pan; app.ui.world_zoom = zoom;
+
+    let grid_step = 48.0 * zoom;
+    if grid_step >= 16.0 {
+        let grid_col = if ui.visuals().dark_mode { Color32::from_rgba_unmultiplied(255,255,255,16) } else { Color32::from_rgba_unmultiplied(0,0,0,16) };
+        let ox = (pan.x % grid_step + grid_step) % grid_step;
+        let oy = (pan.y % grid_step + grid_step) % grid_step;
+        let mut x = rect.min.x + ox; while x < rect.max.x { painter.line_segment([pos2(x, rect.min.y), pos2(x, rect.max.y)], Stroke::new(1.0, grid_col)); x += grid_step; }
+        let mut y = rect.min.y + oy; while y < rect.max.y { painter.line_segment([pos2(rect.min.x, y), pos2(rect.max.x, y)], Stroke::new(1.0, grid_col)); y += grid_step; }
+    }
+
+    let style = group.kind.style();
+    painter.text(pos2(rect.min.x + 20.0, rect.min.y + 24.0), Align2::LEFT_CENTER, format!("{} — {}.kt", group.kind.label(), group.name), semibold(18.0), c32(style.accent));
+    painter.text(pos2(rect.min.x + 20.0, rect.min.y + 48.0), Align2::LEFT_CENTER, "Canvas limpio (pan/zoom). Paleta de nodos: próximo hito.", regular(12.0), t.text_secondary);
+
+    let back = Rect::from_min_size(pos2(rect.max.x - 220.0, rect.min.y + 16.0), vec2(200.0, 32.0));
+    let back_resp = ui.interact(back, ui.scope_id().with(("clean_ws_back", idx)), Sense::click());
+    painter.rect_filled(back, CornerRadius::same(8), if back_resp.hovered() { Color32::from_rgb(0x1F,0xA8,0x6A) } else { Color32::from_rgb(0x0C,0xCE,0x87) });
+    painter.text(back.center(), Align2::CENTER_CENTER, "Guardar y volver al World Space", regular(12.0), Color32::BLACK);
+    if back_resp.clicked() {
+        save_project(app);
+        app.ui.project_workspace = None;
+        app.ui.home = true;
+    }
+}
+
+
+
+pub(crate) fn active_workspace_kind(app: &FigApp) -> Option<crate::project::FileGroupKind> {
+    let idx = app.ui.project_workspace?;
+    let p = app.ui.project.as_ref()?;
+    p.files.get(idx).map(|g| g.kind)
+}
+
+pub(crate) fn show_project_workspace(app: &mut FigApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    project_view(app, ui, &t);
+}
+fn capture_active_group_figcraft(app: &mut FigApp) {
+    use base64::Engine as _;
+    let Some(idx) = app.ui.project_workspace else { return };
+    let Some(kind) = app.ui.project.as_ref().and_then(|p| p.files.get(idx).map(|g| g.kind)) else { return };
+    if !kind.opens_figcraft() { return; }
+    let Some(r) = app.run("file.saveAs", serde_json::json!({"data": true})) else { return };
+    let Some(data_b64) = r.get("data").and_then(|v| v.as_str()) else { return };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data_b64) else { return };
+    let Some(p) = app.ui.project.as_mut() else { return };
+    if let Some(g) = p.files.get_mut(idx) {
+        let name = crate::project::VoidXProject::sanitize_name(&g.name);
+        g.visual = Some(format!("{name}.figcraft"));
+        g.visual_data = Some(bytes);
+    }
+}
+
+pub(crate) fn save_project(app: &mut FigApp) {
+    capture_active_group_figcraft(app);
+    let Some(project) = app.ui.project.clone() else { return };
+    let dir = app.services.documents_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(format!("{}.vxs", crate::project::VoidXProject::sanitize_name(&project.name)));
+    if let Err(e) = crate::project::save(&path, &project) {
+        app.toast(format!("No se pudo guardar .vxs: {e}"));
     }
 }
 
