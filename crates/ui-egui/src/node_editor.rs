@@ -2,7 +2,7 @@
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 
-use crate::logic::{LogicGraph, LogicNode, NodeKind, NodeLink, NodeProps};
+use crate::logic::{LogicGraph, LogicNode, NodeKind, NodeProps};
 use crate::project::FileGroupKind;
 use crate::theme::{Tokens, regular, semibold};
 
@@ -156,7 +156,7 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
             painter.text(in_btn.center(), Align2::CENTER_CENTER, "⬅ Entrada", regular((11.0*zoom).max(10.0)), t.text);
             if r.clicked() {
                 st.selected_node = Some(n.id);
-                let port = n.kind.inputs().get(0).unwrap_or(&"in").to_string();
+                let port = n.kind.inputs().first().map(|p| p.name).unwrap_or("execute").to_string();
                 st.connect_panel = Some(ConnectPanel { node_id: n.id, port, is_output: false, create_mode: false });
                 st.add_open = false;
             }
@@ -167,7 +167,7 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
             painter.text(out_btn.center(), Align2::CENTER_CENTER, "Salida ➡", regular((11.0*zoom).max(10.0)), t.text);
             if r.clicked() {
                 st.selected_node = Some(n.id);
-                let port = n.kind.outputs().get(0).unwrap_or(&"out").to_string();
+                let port = n.kind.outputs().first().map(|p| p.name).unwrap_or("out").to_string();
                 st.connect_panel = Some(ConnectPanel { node_id: n.id, port, is_output: true, create_mode: false });
                 st.add_open = false;
             }
@@ -349,6 +349,7 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
             .filter(|k| {
                 q.is_empty()
                     || k.label().to_ascii_lowercase().contains(&q)
+                    || k.semantic_id().to_ascii_lowercase().contains(&q)
                     || k.description().to_ascii_lowercase().contains(&q)
                     || k.category().map(|c| c.label().to_ascii_lowercase().contains(&q)).unwrap_or(false)
             })
@@ -428,10 +429,10 @@ pub fn show(ui: &mut Ui, t: &Tokens, group_kind: FileGroupKind, graph: &mut Logi
 
 fn connection_status(graph: &LogicGraph, panel: &ConnectPanel, cand: &LogicNode) -> (bool, &'static str) {
     let (from_node, from_port, to_node, to_port) = if panel.is_output {
-        let Some(to_port) = cand.kind.inputs().get(0).copied() else { return (false, "Sin entrada"); };
+        let Some(to_port) = cand.kind.inputs().first().map(|p| p.name) else { return (false, "Sin entrada"); };
         (panel.node_id, panel.port.as_str(), cand.id, to_port)
     } else {
-        let Some(from_port) = cand.kind.outputs().get(0).copied() else { return (false, "Sin salida"); };
+        let Some(from_port) = cand.kind.outputs().first().map(|p| p.name) else { return (false, "Sin salida"); };
         (cand.id, from_port, panel.node_id, panel.port.as_str())
     };
     match graph.can_connect(from_node, from_port, to_node, to_port) {
@@ -442,16 +443,13 @@ fn connection_status(graph: &LogicGraph, panel: &ConnectPanel, cand: &LogicNode)
 
 fn create_link(graph: &mut LogicGraph, panel: &ConnectPanel, other_id: u64) {
     let (from_node, from_port, to_node, to_port) = if panel.is_output {
-        let to_port = graph.nodes.iter().find(|n| n.id == other_id).and_then(|n| n.kind.inputs().get(0).copied()).unwrap_or("in").to_string();
+        let to_port = graph.nodes.iter().find(|n| n.id == other_id).and_then(|n| n.kind.inputs().first().map(|p| p.name)).unwrap_or("execute").to_string();
         (panel.node_id, panel.port.clone(), other_id, to_port)
     } else {
-        let from_port = graph.nodes.iter().find(|n| n.id == other_id).and_then(|n| n.kind.outputs().get(0).copied()).unwrap_or("out").to_string();
+        let from_port = graph.nodes.iter().find(|n| n.id == other_id).and_then(|n| n.kind.outputs().first().map(|p| p.name)).unwrap_or("out").to_string();
         (other_id, from_port, panel.node_id, panel.port.clone())
     };
-    if graph.can_connect(from_node, &from_port, to_node, &to_port).is_err() { return; }
-    graph.links.retain(|l| !(l.to_node == to_node && l.to_port == to_port));
-    graph.links.retain(|l| !(l.from_node == from_node && l.from_port == from_port && l.to_node == to_node && l.to_port == to_port));
-    graph.links.push(NodeLink { from_node, from_port, to_node, to_port });
+    let _ = graph.connect(from_node, &from_port, to_node, &to_port);
 }
 
 pub fn auto_order(graph: &mut LogicGraph) {
@@ -525,59 +523,63 @@ fn sample_bezier_ctrl(a: Pos2, c1: Pos2, c2: Pos2, b: Pos2, t: f32) -> Pos2 {
 pub fn default_props(kind: NodeKind) -> NodeProps {
     let mut p = NodeProps::default();
     match kind {
-        NodeKind::SetInitialScreen | NodeKind::NavigateTo => { p.target = "screen".into(); }
-        NodeKind::NavigateToScreen => { p.target = "screen".into(); p.clear_history = false; }
-        NodeKind::InitEngine | NodeKind::InitData | NodeKind::InitNetwork => { p.module = "module".into(); p.target = "module".into(); }
-        NodeKind::CallModuleFunction | NodeKind::CallFunction => { p.module = "module".into(); p.fn_name = "function".into(); }
+        NodeKind::ApplicationReady => { p.conditions = "[]".into(); }
+        NodeKind::InitializeContainer | NodeKind::GetContainerStatus | NodeKind::RestartContainer => { p.container = "ui.main".into(); }
+        NodeKind::CallContainer | NodeKind::CallContainerAsync => { p.target_container = "ui.main".into(); p.target_operation = "operation".into(); p.parameters = "{}".into(); }
+        NodeKind::WaitForContainer => { p.container = "ui.main".into(); p.execution_handle = "".into(); }
+        NodeKind::SetContainerState => { p.container = "ui.main".into(); p.enabled = true; }
+        NodeKind::EmitEvent => { p.event_name = "event.name".into(); p.payload = "{}".into(); }
+        NodeKind::WaitForEvent => { p.event_name = "event.name".into(); p.timeout_ms = 1000; }
+        NodeKind::SubscribeToEvent => { p.event_name = "event.name".into(); }
+        NodeKind::UnsubscribeFromEvent => { p.subscription_id = "sub_1".into(); }
+        NodeKind::ForwardEvent => { p.target = "container.target".into(); }
+        NodeKind::FilterEvent => { p.conditions = "[]".into(); }
+        NodeKind::Sequence => { p.steps = "[]".into(); }
+        NodeKind::Branch => { p.condition = "a == b".into(); p.left = "a".into(); p.cond_op = "==".into(); p.right = "b".into(); }
+        NodeKind::Switch => { p.value = "".into(); p.cases = "[\"case_a\",\"case_b\"]".into(); }
+        NodeKind::MergeFlow => { p.merge_policy = "first".into(); }
+        NodeKind::Gate => { p.enabled = true; }
+        NodeKind::Delay => { p.duration_ms = 500; p.ms = 500; }
+        NodeKind::RepeatFlow => { p.repeat_mode = "count".into(); p.iterations = 3; p.condition = "".into(); }
+        NodeKind::StartParallel | NodeKind::RaceExecution => { p.tasks = "[]".into(); p.race_policy = "first_success".into(); }
+        NodeKind::WaitForAll | NodeKind::WaitForAny => { p.execution_group = "group_1".into(); }
+        NodeKind::LimitConcurrency => { p.max_concurrent = 2; }
+        NodeKind::TryCatchFlow => { p.operation = "operation".into(); }
+        NodeKind::RetryExecution => { p.operation = "operation".into(); p.max_attempts = 3; p.retry_delay_ms = 250; }
+        NodeKind::ExecutionTimeout => { p.operation = "operation".into(); p.timeout_ms = 1000; }
+        NodeKind::FallbackExecution => { p.primary = "primary".into(); p.fallback = "fallback".into(); }
+        NodeKind::SetLaunchContext => { p.key = "launch.key".into(); p.value = "".into(); }
+        NodeKind::GetLaunchContext => { p.key = "launch.key".into(); }
+        NodeKind::ShareExecutionContext => { p.target = "container.target".into(); }
+        NodeKind::ReturnResult => { p.result = "{}".into(); }
+        NodeKind::CompleteFlow => { p.result = "{}".into(); }
+        NodeKind::ApplicationControl => { p.action = "request_close".into(); }
+        NodeKind::SetText => { p.target = "textNode".into(); p.value = "Hello".into(); }
+        NodeKind::SetVisible => { p.target = "element".into(); p.visible = true; }
+        NodeKind::NavigateTo => { p.target = "screen".into(); }
+        NodeKind::CallFunction => { p.module = "module".into(); p.fn_name = "function".into(); }
         NodeKind::DefineFunction => p.name = "function".into(),
         NodeKind::OnTap => p.target = "element".into(),
-        NodeKind::SetVisible => { p.target = "element".into(); p.visible = true; }
-        NodeKind::SetText => { p.target = "textNode".into(); p.value = "Hello".into(); }
         NodeKind::SetVariable => { p.name = "var".into(); p.value_type = "text".into(); p.value = "".into(); }
         NodeKind::MathOp => { p.op = "+".into(); p.left = "a".into(); p.right = "b".into(); }
         NodeKind::IfCondition => { p.left = "a".into(); p.cond_op = "==".into(); p.right = "b".into(); }
-        NodeKind::DelayTimer => p.ms = 500,
+        NodeKind::DelayTimer => { p.ms = 500; p.duration_ms = 500; }
         NodeKind::SaveLocal | NodeKind::LoadLocal | NodeKind::DeleteLocal => { p.key = "key".into(); p.value = "".into(); }
         NodeKind::HttpRequest => { p.method = "GET".into(); p.url = "https://api.example.com".into(); }
         NodeKind::JsonGetField => { p.field = "data".into(); }
-        NodeKind::RequestPermission | NodeKind::CheckPermission => p.permission = "Camera".into(),
-        NodeKind::SetStatusBar => { p.color = "#0CCE87".into(); p.dark_icons = false; }
-        NodeKind::KeepScreenOn => p.enabled = true,
-        NodeKind::OpenExternalUrl => p.url = "https://example.com".into(),
-        NodeKind::ShareText => p.value = "Hello from VoidX".into(),
-        NodeKind::LogDebug => { p.tag = "Main".into(); p.message = "debug".into(); }
         _ => {}
     }
     p
 }
 
 fn prop_preview(p: &NodeProps, kind: NodeKind) -> Vec<String> {
-    match kind {
-        NodeKind::OnReady => vec!["Inicio del contenedor".into()],
-        NodeKind::OnResume | NodeKind::OnPause | NodeKind::OnDestroy | NodeKind::OnBackPressed | NodeKind::ExitApp => vec![kind.description().into()],
-        NodeKind::SetInitialScreen | NodeKind::NavigateTo => vec![format!("screen: {}", p.target)],
-        NodeKind::NavigateToScreen => vec![format!("screen: {}", p.target), format!("clear: {}", p.clear_history)],
-        NodeKind::InitEngine | NodeKind::InitData | NodeKind::InitNetwork => vec![format!("module: {}", if p.module.is_empty() { &p.target } else { &p.module })],
-        NodeKind::CallModuleFunction | NodeKind::CallFunction => vec![format!("{}::{}", p.module, p.fn_name)],
-        NodeKind::RequestPermission | NodeKind::CheckPermission => vec![format!("permiso: {}", p.permission)],
-        NodeKind::SetStatusBar => vec![format!("color: {}", p.color), format!("dark_icons: {}", p.dark_icons)],
-        NodeKind::KeepScreenOn => vec![format!("enabled: {}", p.enabled)],
-        NodeKind::OnDeepLink => vec!["salida: url".into()],
-        NodeKind::OpenExternalUrl => vec![format!("url: {}", p.url)],
-        NodeKind::ShareText => vec![format!("text: {}", p.value)],
-        NodeKind::LogDebug => vec![format!("{}: {}", p.tag, p.message)],
-        NodeKind::DefineFunction => vec![format!("name: {}", p.name)],
-        NodeKind::OnTap => vec![format!("element: {}", p.target)],
-        NodeKind::SetVisible => vec![format!("target: {}", p.target), format!("visible: {}", p.visible)],
-        NodeKind::SetText => vec![format!("target: {}", p.target), format!("text: {}", p.value)],
-        NodeKind::SetVariable => vec![format!("{}: {} = {}", p.name, p.value_type, p.value)],
-        NodeKind::MathOp => vec![format!("{} {} {}", p.left, p.op, p.right)],
-        NodeKind::IfCondition => vec![format!("{} {} {}", p.left, p.cond_op, p.right)],
-        NodeKind::DelayTimer => vec![format!("{} ms", p.ms)],
-        NodeKind::SaveLocal | NodeKind::LoadLocal | NodeKind::DeleteLocal => vec![format!("key: {}", p.key)],
-        NodeKind::HttpRequest => vec![format!("{} {}", p.method, p.url)],
-        NodeKind::JsonGetField => vec![format!("field: {}", p.field)],
-    }
+    let defs = kind.prop_defs();
+    if defs.is_empty() { return vec![kind.description().to_string()]; }
+    defs.iter().take(4).map(|d| {
+        let v = p.get(d.key);
+        let show = if v.len() > 22 { format!("{}…", &v[..22]) } else { v };
+        format!("{}: {}", d.label, show)
+    }).collect()
 }
 
 fn node_rect(rect: Rect, pan: egui::Vec2, zoom: f32, n: &LogicNode) -> Rect {
@@ -598,7 +600,7 @@ fn port_pos(rect: Rect, pan: egui::Vec2, zoom: f32, g: &LogicGraph, node_id: u64
     let n = g.nodes.iter().find(|n| n.id == node_id)?;
     let nr = node_rect(rect, pan, zoom, n);
     let ports = if input { n.kind.inputs() } else { n.kind.outputs() };
-    let idx = ports.iter().position(|p| *p == port).unwrap_or(0);
+    let idx = ports.iter().position(|p| p.name == port).unwrap_or(0);
     Some(if input { input_port(nr, zoom, idx) } else { output_port(nr, zoom, idx) })
 }
 

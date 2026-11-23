@@ -365,7 +365,12 @@ pub fn load(path: &Path) -> Result<VoidXProject, String> {
         }
         let lname = format!("{}.logic.json", VoidXProject::sanitize_name(&g.name));
         if let Some(v) = logics.remove(&lname) {
-            g.logic = Some(v);
+            // Normalize legacy/colliding node kinds using owning group kind.
+            let nv = match crate::logic::LogicGraph::from_value_for_group(v.clone(), g.kind) {
+                Ok(graph) => serde_json::to_value(graph).unwrap_or(v),
+                Err(_) => v,
+            };
+            g.logic = Some(nv);
         }
     }
     Ok(project)

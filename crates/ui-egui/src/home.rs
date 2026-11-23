@@ -626,7 +626,7 @@ fn node_workspace(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize, group: 
 }
 
 fn draw_node_workspace_contents(app: &mut FigApp, ui: &mut Ui, t: &Tokens, idx: usize, group: &crate::project::FileGroup, canvas_rect: Rect, embedded_ui: bool) {
-    let mut graph = app.ui.project.as_ref().and_then(|p| p.files.get(idx)).and_then(|g| g.logic.clone()).and_then(|v| serde_json::from_value::<crate::logic::LogicGraph>(v).ok()).unwrap_or_default();
+    let mut graph = app.ui.project.as_ref().and_then(|p| p.files.get(idx)).and_then(|g| g.logic.clone()).and_then(|v| crate::logic::LogicGraph::from_value_for_group(v, group.kind).ok()).unwrap_or_default();
     if group.kind == crate::project::FileGroupKind::Main && graph.nodes.is_empty() {
         graph.nodes.push(crate::logic::LogicNode { id: 1, kind: crate::logic::NodeKind::OnReady, x: 0.0, y: 0.0, props: crate::node_editor::default_props(crate::logic::NodeKind::OnReady) });
     }
